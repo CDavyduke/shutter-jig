@@ -1,0 +1,626 @@
+                        .module lib_optrex.c
+                        .area text
+ 0000           _OptrexInit::
+ 0000           ;  
+ 0000           ; //===========================================================================
+ 0000           ; //
+ 0000           ; //      File:       OPTREX_LIB.C
+ 0000           ; //
+ 0000           ; //      Purpose:    Axiom 68HC11 LCD Routines for Optrex Displays
+ 0000           ; //
+ 0000           ; //      Version:    1.20
+ 0000           ; //
+ 0000           ; //      Date:       March 13, 2001
+ 0000           ; //
+ 0000           ; //      Author:     Wayne Mah
+ 0000           ; //
+ 0000           ; //      Compiler:   ImageCraft C
+ 0000           ; //
+ 0000           ; //---------------------------------------------------------------------------
+ 0000           ; //
+ 0000           ; //      History:    0.90    99/01/31    Genesis
+ 0000           ; //                  1.00    00/12/10    Update
+ 0000           ; //                  1.10    01/02/17    Update
+ 0000           ; //                  1.11    01/03/11    Renamed to OPTREX_LIB.C
+ 0000           ; //                  1.20    01/03/12    Update
+ 0000           ; //
+ 0000           ; //===========================================================================
+ 0000           ; 
+ 0000           ; #include <stdio.h>
+ 0000           ; #include <lib_optrex.h>
+ 0000           ; 
+ 0000           ; //----------------------------------------------
+ 0000           ; //  LCD is memory mapped on the CMD/CMM boards
+ 0000           ; //----------------------------------------------
+ 0000           ; 
+ 0000           ; #define OPTREX_CMDREG  *(unsigned char volatile *)(0xB5F0)
+ 0000           ; #define OPTREX_DATAREG *(unsigned char volatile *)(0xB5F1)
+ 0000           ; 
+ 0000           ; 
+ 0000           ; //---------------
+ 0000           ; //  local globs
+ 0000           ; //---------------
+ 0000           ; 
+ 0000           ; unsigned char g_dispmode;
+ 0000           ; 
+ 0000           ; 
+ 0000           ; //-----------------------------
+ 0000           ; //  Local Function Prototypes
+ 0000           ; //-----------------------------
+ 0000           ; 
+ 0000           ; void OptrexBusy(void);
+ 0000           ; 
+ 0000           ; 
+ 0000           ; 
+ 0000           ; //---------------------------------------------------------------------------
+ 0000           ; //  LCD Initialization
+ 0000           ; //---------------------------------------------------------------------------
+ 0000           ; 
+ 0000           ; void OptrexInit(void)
+ 0000           ; {
+ 0000           ;     g_dispmode = 0x0c;
+ 0000 C60C              ldab #12
+ 0002 F70000            stab _g_dispmode
+ 0005           ; 
+ 0005           ;     OptrexCommand(0x3C);                   // initialize command
+ 0005 CC003C            ldd #60
+ 0008 BD01D7            jsr _OptrexCommand
+ 000B           ;     OptrexCommand(g_dispmode);             // display on, cursor off
+ 000B F60000            ldab _g_dispmode
+ 000E 4F                clra
+ 000F BD01D7            jsr _OptrexCommand
+ 0012           ;     OptrexCommand(0x06);
+ 0012 CC0006            ldd #6
+ 0015 BD01D7            jsr _OptrexCommand
+ 0018           ; 
+ 0018           ;     OptrexClear();
+ 0018 BD0046            jsr _OptrexClear
+ 001B           ; }
+ 001B           L1:
+ 001B                   .dbline 0 ; func end
+ 001B 39                rts
+ 001C           ;  IX -> 0,x
+ 001C           ;          ?temp -> +2,x
+ 001C           ;           sptr -> +6,x
+ 001C           _OptrexWriteString::
+ 001C BD0000            jsr __enterb
+ 001F 44                .byte 0x44
+ 0020           ; 
+ 0020           ; 
+ 0020           ; void OptrexWriteString(char *sptr)
+ 0020           ; {
+ 0020 2013              bra L4
+ 0022           L3:
+ 0022 EC06              ldd 6,x
+ 0024 ED02              std 2,x
+ 0026 C30001            addd #1
+ 0029 ED06              std 6,x
+ 002B 1AEE02            ldy 2,x
+ 002E 18E600            ldab 0,y
+ 0031 4F                clra
+ 0032 BD0172            jsr _OptrexWrite
+ 0035           L4:
+ 0035           ; 	while(*sptr)
+ 0035 1AEE06            ldy 6,x
+ 0038 186D00            tst 0,y
+ 003B 26E5              bne L3
+ 003D           ;               OptrexWrite(*sptr++);
+ 003D           ; }
+ 003D           L2:
+ 003D 08                inx
+ 003E 08                inx
+ 003F 08                inx
+ 0040 08                inx
+ 0041 35                txs
+ 0042 38                pulx
+ 0043 1838              puly
+ 0045                   .dbline 0 ; func end
+ 0045 39                rts
+ 0046           _OptrexClear::
+ 0046           ; 
+ 0046           ; 
+ 0046           ; 
+ 0046           ; //-----------------------------------------------------------------------
+ 0046           ; //
+ 0046           ; //  OptrexClear()
+ 0046           ; //
+ 0046           ; //  Writes the space code 0x20 into all addresses of DDRAM.  Returns
+ 0046           ; //  display to its original position if it was shifted.  In other words,
+ 0046           ; //  the display clears and the cursor or blink moves to the upper left
+ 0046           ; //  edge of the display.  The execution of clear display set entry mode
+ 0046           ; //  to incremental mode.
+ 0046           ; //
+ 0046           ; //-----------------------------------------------------------------------
+ 0046           ; 
+ 0046           ; void OptrexClear(void)
+ 0046           ; {
+ 0046           ;     OptrexCommand(0x01);
+ 0046 CC0001            ldd #1
+ 0049 BD01D7            jsr _OptrexCommand
+ 004C           ; }
+ 004C           L6:
+ 004C                   .dbline 0 ; func end
+ 004C 39                rts
+ 004D           ;  IX -> 0,x
+ 004D           ;     start_addr -> +3,x
+ 004D           ;       end_addr -> +4,x
+ 004D           ;              i -> +5,x
+ 004D           _OptrexClearEOL::
+ 004D BD0000            jsr __enterb
+ 0050 06                .byte 0x6
+ 0051           ; 
+ 0051           ; void OptrexClearEOL(void)
+ 0051           ; {
+ 0051           ;     unsigned char start_addr, end_addr, i;
+ 0051           ; 
+ 0051           ;     start_addr = OptrexGetAddress();
+ 0051 BD016B            jsr _OptrexGetAddress
+ 0054 E703              stab 3,x
+ 0056           ; 
+ 0056           ;     if (start_addr >= 0x00 && start_addr <= 0x13)
+ 0056 6D03              tst 3,x
+ 0058 250C              blo L8
+ 005A E603              ldab 3,x
+ 005C C113              cmpb #19
+ 005E 2206              bhi L8
+ 0060           ;     {
+ 0060           ;         end_addr = 0x13;
+ 0060 C613              ldab #19
+ 0062 E704              stab 4,x
+ 0064           ;     }
+ 0064 2022              bra L9
+ 0066           L8:
+ 0066           ;     else if (start_addr >= 0x40 && start_addr <= 0x53)
+ 0066 E603              ldab 3,x
+ 0068 C140              cmpb #64
+ 006A 250C              blo L10
+ 006C E603              ldab 3,x
+ 006E C153              cmpb #83
+ 0070 2206              bhi L10
+ 0072           ;     {
+ 0072           ;         end_addr = 0x53;
+ 0072 C653              ldab #83
+ 0074 E704              stab 4,x
+ 0076           ;     }
+ 0076 2010              bra L11
+ 0078           L10:
+ 0078           ;     else if (start_addr >= 0x14 && start_addr <= 0x27)
+ 0078 E603              ldab 3,x
+ 007A C114              cmpb #20
+ 007C 250A              blo L12
+ 007E E603              ldab 3,x
+ 0080 C127              cmpb #39
+ 0082 2204              bhi L12
+ 0084           ;     {
+ 0084           ;         end_addr = 0x27;
+ 0084 C627              ldab #39
+ 0086 E704              stab 4,x
+ 0088           ;     }
+ 0088           L12:
+ 0088           L11:
+ 0088           L9:
+ 0088           ;     if (start_addr >= 0x54 && start_addr <= 0x67)
+ 0088 E603              ldab 3,x
+ 008A C154              cmpb #84
+ 008C 250A              blo L14
+ 008E E603              ldab 3,x
+ 0090 C167              cmpb #103
+ 0092 2204              bhi L14
+ 0094           ;     {
+ 0094           ;         end_addr = 0x67;
+ 0094 C667              ldab #103
+ 0096 E704              stab 4,x
+ 0098           ;     }
+ 0098           L14:
+ 0098           ; 
+ 0098           ;     for (i = start_addr; i <= end_addr; i++)
+ 0098 E603              ldab 3,x
+ 009A E705              stab 5,x
+ 009C 200C              bra L19
+ 009E           L16:
+ 009E CC0020            ldd #32
+ 00A1 BD0172            jsr _OptrexWrite
+ 00A4           L17:
+ 00A4 E605              ldab 5,x
+ 00A6 CB01              addb #1
+ 00A8 E705              stab 5,x
+ 00AA           L19:
+ 00AA E605              ldab 5,x
+ 00AC E104              cmpb 4,x
+ 00AE 23EE              bls L16
+ 00B0           ;     {
+ 00B0           ;         OptrexWrite(' ');
+ 00B0           ;     }
+ 00B0           ; 
+ 00B0           ;     OptrexSetAddress(start_addr);
+ 00B0 E603              ldab 3,x
+ 00B2 4F                clra
+ 00B3 BD0155            jsr _OptrexSetAddress
+ 00B6           ; }
+ 00B6           L7:
+ 00B6 8F                xgdx
+ 00B7 C30006            addd #6
+ 00BA 8F                xgdx
+ 00BB 35                txs
+ 00BC 38                pulx
+ 00BD                   .dbline 0 ; func end
+ 00BD 39                rts
+ 00BE           _OptrexHome::
+ 00BE           ; 
+ 00BE           ; 
+ 00BE           ; 
+ 00BE           ; 
+ 00BE           ; //-----------------------------------------------------------------------
+ 00BE           ; //
+ 00BE           ; //  OptrexHome()
+ 00BE           ; //
+ 00BE           ; //  Set the DDRAM address "0" in address counter.  Return display to its
+ 00BE           ; //  original position if it was shifted.  DDRAM contents do not change.
+ 00BE           ; //
+ 00BE           ; //  The cursor or the blink moves to teh upper left edge of the display.
+ 00BE           ; //  Text on the display remains unchanged.
+ 00BE           ; //
+ 00BE           ; //-----------------------------------------------------------------------
+ 00BE           ; 
+ 00BE           ; void OptrexHome(void)
+ 00BE           ; {
+ 00BE           ;     OptrexCommand(0x02);
+ 00BE CC0002            ldd #2
+ 00C1 BD01D7            jsr _OptrexCommand
+ 00C4           ; }
+ 00C4           L20:
+ 00C4                   .dbline 0 ; func end
+ 00C4 39                rts
+ 00C5           ;  IX -> 0,x
+ 00C5           ;           mode -> +5,x
+ 00C5           _OptrexEntryMode::
+ 00C5 37                pshb
+ 00C6 36                psha
+ 00C7 3C                pshx
+ 00C8 3C                pshx
+ 00C9 30                tsx
+ 00CA EF00              stx 0,x
+ 00CC           ; 
+ 00CC           ; 
+ 00CC           ; //-----------------------------------------------------------------------
+ 00CC           ; //
+ 00CC           ; //  OptrexEntryMode()
+ 00CC           ; //
+ 00CC           ; //  Sets the INC/DEC and shift modes to the desired settings.
+ 00CC           ; //
+ 00CC           ; //  Bit 1 = 1 increments, Bit1 = 0 decrements the DDRAM address by 1
+ 00CC           ; //  when a character code is written into or read from the DDRAM
+ 00CC           ; //
+ 00CC           ; //-----------------------------------------------------------------------
+ 00CC           ;  void OptrexEntryMode(char mode)
+ 00CC           ; {
+ 00CC           ;     OptrexCommand(0x04|(0x03&mode));
+ 00CC E605              ldab 5,x
+ 00CE C403              andb #3
+ 00D0 CA04              orab #4
+ 00D2 4F                clra
+ 00D3 BD01D7            jsr _OptrexCommand
+ 00D6           ; }
+ 00D6           L21:
+ 00D6 08                inx
+ 00D7 08                inx
+ 00D8 35                txs
+ 00D9 38                pulx
+ 00DA 1838              puly
+ 00DC                   .dbline 0 ; func end
+ 00DC 39                rts
+ 00DD           ;  IX -> 0,x
+ 00DD           ;  rMEM -> 2,x
+ 00DD           ;            val -> +7,x
+ 00DD           _OptrexSetBlink::
+ 00DD BD0000            jsr __enterb
+ 00E0 44                .byte 0x44
+ 00E1           ; 
+ 00E1           ; 
+ 00E1           ; void OptrexSetBlink(char val)
+ 00E1           ; {
+ 00E1           ;     OptrexSetDisplayControl((g_dispmode & ~0x01) | (val & 1));
+ 00E1 E607              ldab 7,x
+ 00E3 C401              andb #1
+ 00E5 E702              stab 2,x
+ 00E7 F60000            ldab _g_dispmode
+ 00EA C4FE              andb #-2
+ 00EC EA02              orab 2,x
+ 00EE 4F                clra
+ 00EF BD013A            jsr _OptrexSetDisplayControl
+ 00F2           ; }
+ 00F2           L22:
+ 00F2 08                inx
+ 00F3 08                inx
+ 00F4 08                inx
+ 00F5 08                inx
+ 00F6 35                txs
+ 00F7 38                pulx
+ 00F8 1838              puly
+ 00FA                   .dbline 0 ; func end
+ 00FA 39                rts
+ 00FB           ;  IX -> 0,x
+ 00FB           ;  rMEM -> 2,x
+ 00FB           ;            val -> +7,x
+ 00FB           _OptrexSetCursor::
+ 00FB BD0000            jsr __enterb
+ 00FE 44                .byte 0x44
+ 00FF           ; 
+ 00FF           ; void OptrexSetCursor(char val)
+ 00FF           ; {
+ 00FF           ;     OptrexSetDisplayControl((g_dispmode & ~0x02) | ((val & 1) << 1));
+ 00FF E607              ldab 7,x
+ 0101 C401              andb #1
+ 0103 58                lslb
+ 0104 E702              stab 2,x
+ 0106 F60000            ldab _g_dispmode
+ 0109 C4FD              andb #-3
+ 010B EA02              orab 2,x
+ 010D 4F                clra
+ 010E BD013A            jsr _OptrexSetDisplayControl
+ 0111           ; }
+ 0111           L23:
+ 0111 08                inx
+ 0112 08                inx
+ 0113 08                inx
+ 0114 08                inx
+ 0115 35                txs
+ 0116 38                pulx
+ 0117 1838              puly
+ 0119                   .dbline 0 ; func end
+ 0119 39                rts
+ 011A           ;  IX -> 0,x
+ 011A           ;  rMEM -> 2,x
+ 011A           ;            val -> +7,x
+ 011A           _OptrexSetDisplay::
+ 011A BD0000            jsr __enterb
+ 011D 44                .byte 0x44
+ 011E           ; 
+ 011E           ; void OptrexSetDisplay(char val)
+ 011E           ; {
+ 011E           ;     OptrexSetDisplayControl((g_dispmode & ~0x04) | ((val & 1) << 2));
+ 011E E607              ldab 7,x
+ 0120 C401              andb #1
+ 0122 58                lslb
+ 0123 58                lslb
+ 0124 E702              stab 2,x
+ 0126 F60000            ldab _g_dispmode
+ 0129 C4FB              andb #-5
+ 012B EA02              orab 2,x
+ 012D 4F                clra
+ 012E BD013A            jsr _OptrexSetDisplayControl
+ 0131           ; }
+ 0131           L24:
+ 0131 08                inx
+ 0132 08                inx
+ 0133 08                inx
+ 0134 08                inx
+ 0135 35                txs
+ 0136 38                pulx
+ 0137 1838              puly
+ 0139                   .dbline 0 ; func end
+ 0139 39                rts
+ 013A           ;  IX -> 0,x
+ 013A           ;            val -> +5,x
+ 013A           _OptrexSetDisplayControl::
+ 013A 37                pshb
+ 013B 36                psha
+ 013C 3C                pshx
+ 013D 3C                pshx
+ 013E 30                tsx
+ 013F EF00              stx 0,x
+ 0141           ; 
+ 0141           ; void OptrexSetDisplayControl(char val)
+ 0141           ; {
+ 0141           ;     OptrexCommand(0x08|val);
+ 0141 E605              ldab 5,x
+ 0143 CA08              orab #8
+ 0145 4F                clra
+ 0146 BD01D7            jsr _OptrexCommand
+ 0149           ;     
+ 0149           ;     g_dispmode = val;
+ 0149 E605              ldab 5,x
+ 014B F70000            stab _g_dispmode
+ 014E           ; }
+ 014E           L25:
+ 014E 08                inx
+ 014F 08                inx
+ 0150 35                txs
+ 0151 38                pulx
+ 0152 1838              puly
+ 0154                   .dbline 0 ; func end
+ 0154 39                rts
+ 0155           ;  IX -> 0,x
+ 0155           ;           addr -> +5,x
+ 0155           _OptrexSetAddress::
+ 0155 37                pshb
+ 0156 36                psha
+ 0157 3C                pshx
+ 0158 3C                pshx
+ 0159 30                tsx
+ 015A EF00              stx 0,x
+ 015C           ; 
+ 015C           ; void OptrexSetAddress(unsigned char addr)
+ 015C           ; {
+ 015C           ;     OptrexCommand(0x80|addr);              // set DDRAM address
+ 015C E605              ldab 5,x
+ 015E CA80              orab #128
+ 0160 4F                clra
+ 0161 BD01D7            jsr _OptrexCommand
+ 0164           ; }
+ 0164           L26:
+ 0164 08                inx
+ 0165 08                inx
+ 0166 35                txs
+ 0167 38                pulx
+ 0168 1838              puly
+ 016A                   .dbline 0 ; func end
+ 016A 39                rts
+ 016B           _OptrexGetAddress::
+ 016B           ; 
+ 016B           ; unsigned char OptrexGetAddress(void)
+ 016B           ; {
+ 016B           ;    return (OPTREX_CMDREG & 0x7f);
+ 016B           	; vol
+ 016B F6B5F0            ldab 0xb5f0
+ 016E C47F              andb #127
+ 0170 4F                clra
+ 0171           L27:
+ 0171                   .dbline 0 ; func end
+ 0171 39                rts
+ 0172           ;  IX -> 0,x
+ 0172           ;           dval -> +5,x
+ 0172           _OptrexWrite::
+ 0172 37                pshb
+ 0173 36                psha
+ 0174 3C                pshx
+ 0175 3C                pshx
+ 0176 30                tsx
+ 0177 EF00              stx 0,x
+ 0179           ; }
+ 0179           ; 
+ 0179           ; void OptrexWrite(char dval)
+ 0179           ; {
+ 0179           ;     OptrexBusy();                          // wait for busy to clear
+ 0179 BD01ED            jsr _OptrexBusy
+ 017C           ;     OPTREX_DATAREG = dval;                 // ouptut data
+ 017C E605              ldab 5,x
+ 017E F7B5F1            stab 0xb5f1
+ 0181           ; }
+ 0181           L28:
+ 0181 08                inx
+ 0182 08                inx
+ 0183 35                txs
+ 0184 38                pulx
+ 0185 1838              puly
+ 0187                   .dbline 0 ; func end
+ 0187 39                rts
+ 0188           ;  IX -> 0,x
+ 0188           ;          ?temp -> +3,x
+ 0188           ;           addr -> +5,x
+ 0188           ;              y -> +13,x
+ 0188           ;              x -> +9,x
+ 0188           _OptrexGotoXY::
+ 0188 BD0000            jsr __enterb
+ 018B 46                .byte 0x46
+ 018C           ; 
+ 018C           ; 
+ 018C           ; void OptrexGotoXY(char x, char y)
+ 018C           ; {
+ 018C           ;     char addr;
+ 018C           ; 
+ 018C           ;     switch (y)
+ 018C E60D              ldab 13,x
+ 018E 4F                clra
+ 018F ED03              std 3,x
+ 0191 271A              beq L33
+ 0193 EC03              ldd 3,x
+ 0195 1A830001          cpd #1
+ 0199 2716              beq L34
+ 019B EC03              ldd 3,x
+ 019D 1A830002          cpd #2
+ 01A1 2714              beq L35
+ 01A3 EC03              ldd 3,x
+ 01A5 1A830003          cpd #3
+ 01A9 2712              beq L36
+ 01AB 2014              bra L30
+ 01AD           X0:
+ 01AD           ;     {
+ 01AD           L33:
+ 01AD           ;         case 0 : addr = 0x00; break;
+ 01AD 6F05              clr 5,x
+ 01AF 2010              bra L31
+ 01B1           L34:
+ 01B1           ;         case 1 : addr = 0x40; break;
+ 01B1 C640              ldab #64
+ 01B3 E705              stab 5,x
+ 01B5 200A              bra L31
+ 01B7           L35:
+ 01B7           ;         case 2 : addr = 0x14; break;
+ 01B7 C614              ldab #20
+ 01B9 E705              stab 5,x
+ 01BB 2004              bra L31
+ 01BD           L36:
+ 01BD           ;         case 3 : addr = 0x54; break;
+ 01BD C654              ldab #84
+ 01BF E705              stab 5,x
+ 01C1           L30:
+ 01C1           L31:
+ 01C1           ;     }
+ 01C1           ; 
+ 01C1           ;     addr += x;
+ 01C1 E605              ldab 5,x
+ 01C3 EB09              addb 9,x
+ 01C5 E705              stab 5,x
+ 01C7           ; 
+ 01C7           ;     OptrexSetAddress(addr);
+ 01C7 E605              ldab 5,x
+ 01C9 4F                clra
+ 01CA BD0155            jsr _OptrexSetAddress
+ 01CD           ; }
+ 01CD           L29:
+ 01CD 8F                xgdx
+ 01CE C30006            addd #6
+ 01D1 8F                xgdx
+ 01D2 35                txs
+ 01D3 38                pulx
+ 01D4 1838              puly
+ 01D6                   .dbline 0 ; func end
+ 01D6 39                rts
+ 01D7           ;  IX -> 0,x
+ 01D7           ;           cval -> +5,x
+ 01D7           _OptrexCommand::
+ 01D7 37                pshb
+ 01D8 36                psha
+ 01D9 3C                pshx
+ 01DA 3C                pshx
+ 01DB 30                tsx
+ 01DC EF00              stx 0,x
+ 01DE           ; 
+ 01DE           ; 
+ 01DE           ; void OptrexCommand(unsigned char cval)
+ 01DE           ; {
+ 01DE           ;     OptrexBusy();                          // wait for busy to clear
+ 01DE BD01ED            jsr _OptrexBusy
+ 01E1           ;     OPTREX_CMDREG = cval;                  // output command
+ 01E1 E605              ldab 5,x
+ 01E3 F7B5F0            stab 0xb5f0
+ 01E6           ; }
+ 01E6           L37:
+ 01E6 08                inx
+ 01E7 08                inx
+ 01E8 35                txs
+ 01E9 38                pulx
+ 01EA 1838              puly
+ 01EC                   .dbline 0 ; func end
+ 01EC 39                rts
+ 01ED           _OptrexBusy::
+ 01ED           ; 
+ 01ED           ; 
+ 01ED           ; //
+ 01ED           ; //               ***************************************
+ 01ED           ; //               *   local functions after this point  *
+ 01ED           ; //               ***************************************
+ 01ED           ; //
+ 01ED           ; 
+ 01ED           ; 
+ 01ED           ; //---------------------------------------------------------------------------
+ 01ED           ; //  Wait for the LCD busy pin to clear
+ 01ED           ; //---------------------------------------------------------------------------
+ 01ED           ; 
+ 01ED           ; void OptrexBusy(void)
+ 01ED           ; {
+ 01ED           L39:
+ 01ED           L40:
+ 01ED           ;     while (OPTREX_CMDREG & 0x80);
+ 01ED 18CEB5F0          ldy #0xb5f0
+ 01F1 181F008002        brclr 0,y,#128,X1
+ 01F6 20F5              bra L39
+ 01F8           X1:
+ 01F8           ; }
+ 01F8           L38:
+ 01F8                   .dbline 0 ; func end
+ 01F8 39                rts
+                        .area bss
+ 0000           _g_dispmode::
+ 0000                   .blkb 1

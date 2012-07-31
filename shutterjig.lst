@@ -1,0 +1,1442 @@
+                        .module shutterjig.c
+                        .area text
+                ;  lreg1 -> -4,x
+                ;  lreg2 -> -8,x
+                ;  IX -> 0,x
+                ;         tmpstr -> +3,x
+ E02F            _main::
+ E02F  BDED04            jsr __enterb
+ E032  98                .byte 0x98
+ E033            ; //=======================================================================
+ E033            ; //
+ E033            ; //
+ E033            ; //      File:       SHUTTERJIG.C
+ E033            ; //
+ E033            ; //      Function:   TH2 Shutter Jig Firmware
+ E033            ; //
+ E033            ; //      Author:     Corey Davyduke
+ E033            ; //
+ E033            ; //      Version:    1.00
+ E033            ; //
+ E033            ; //      Date:       July 31, 2012
+ E033            ; //
+ E033            ; //      Compiler:   Imagecraft C
+ E033            ; //
+ E033            ; //
+ E033            ; //-----------------------------------------------------------------------
+ E033            ; //
+ E033            ; //      History:    1.00    12/07/31    Genesis
+ E033            ; //
+ E033            ; //-----------------------------------------------------------------------
+ E033            ; //
+ E033            ; //      Notes:      text... 0xe000
+ E033            ; //                  data... 0x2000
+ E033            ; //                  sp..... 0x3fff
+ E033            ; //
+ E033            ; //=======================================================================
+ E033            ; 
+ E033            ; #include <hc11.h>
+ E033            ; #include <lib_optrex.h>
+ E033            ; #include <lib_eeprom.h>
+ E033            ; #include <lib_adc.h>
+ E033            ; #include <lib_timer.h>
+ E033            ; 
+ E033            ; // definitions
+ E033            ; #define BUTTON_O 0x01
+ E033            ; #define BUTTON_C 0x02
+ E033            ; #define ON_TIME 100
+ E033            ; #define OFF_TIME 900
+ E033            ; 
+ E033            ; // external proto's
+ E033            ; extern void _start();                 // entry point in crt11.s
+ E033            ; 
+ E033            ; // local proto's
+ E033            ; void sc_init(void);
+ E033            ; void sc_acquire_buttons(void);
+ E033            ; unsigned char sc_get_buttons(void);
+ E033            ; void sc_set_driver(unsigned char val);
+ E033            ; unsigned char sc_get_driver(void);
+ E033            ; void TimerSleep(long msec);
+ E033            ; 
+ E033            ; unsigned long g_scycles;
+ E033            ; unsigned long gTimerSeconds;
+ E033            ; 
+ E033            ; int g_etime_hours;
+ E033            ; char g_etime_mins;
+ E033            ; char g_etime_secs;
+ E033            ; 
+ E033            ; long gFlipTarget;
+ E033            ; long gPulseTarget;
+ E033            ; long gTimerTicks;
+ E033            ; unsigned char g_flipside;
+ E033            ; 
+ E033            ; unsigned char new_buttons, old_buttons;
+ E033            ; 
+ E033            ; 
+ E033            ; void main(void)
+ E033            ; {
+ E033            ;       char tmpstr[21];
+ E033            ; 
+ E033            ;     //-------------------------
+ E033            ;     // initialize ram variable
+ E033            ;     //-------------------------
+ E033            ; 
+ E033            ;     gFlipTarget = 0;                    // important to set this before ints!
+ E033  18CEE446          ldy #L4
+ E037  BDEEB4            jsr __ly2reg
+ E03A  18CE200C          ldy #_gFlipTarget
+ E03E  BDEEF1            jsr __lreg2y
+ E041            ;     g_flipside = 0;
+ E041  7F2003            clr _g_flipside
+ E044            ;     new_buttons = old_buttons = 0;
+ E044  7F2001            clr _old_buttons
+ E047  7F2002            clr _new_buttons
+ E04A            ; 
+ E04A            ;     sc_init();
+ E04A  BDE197            jsr _sc_init
+ E04D            ; 
+ E04D            ;     g_scycles = 0;
+ E04D  18CEE442          ldy #L5
+ E051  BDEEB4            jsr __ly2reg
+ E054  18CE2018          ldy #_g_scycles
+ E058  BDEEF1            jsr __lreg2y
+ E05B            ;     g_etime_hours = 0;
+ E05B  CC0000            ldd #0
+ E05E  FD2012            std _g_etime_hours
+ E061            ;     g_etime_mins = 0;
+ E061  7F2011            clr _g_etime_mins
+ E064            ;     g_etime_secs = 0;
+ E064  7F2010            clr _g_etime_secs
+ E067            ; 
+ E067            ;     sc_acquire_buttons();
+ E067  BDE1A4            jsr _sc_acquire_buttons
+ E06A            ; 
+ E06A            ;     OptrexClear();
+ E06A  BDE490            jsr _OptrexClear
+ E06D            ;     OptrexGotoXY(2,1);
+ E06D  CC0001            ldd #1
+ E070  37                pshb
+ E071  36                psha
+ E072  CC0002            ldd #2
+ E075  BDE5D2            jsr _OptrexGotoXY
+ E078  1838              puly
+ E07A            ;     OptrexWriteString("TH2 Shutter Jig");
+ E07A  CCE432            ldd #L6
+ E07D  BDE466            jsr _OptrexWriteString
+ E080            ;     OptrexGotoXY(3,2);
+ E080  CC0002            ldd #2
+ E083  37                pshb
+ E084  36                psha
+ E085  CC0003            ldd #3
+ E088  BDE5D2            jsr _OptrexGotoXY
+ E08B  1838              puly
+ E08D            ;     OptrexWriteString("Version 1.00");
+ E08D  CCE425            ldd #L7
+ E090  BDE466            jsr _OptrexWriteString
+ E093            ;     TimerSleep(3000);
+ E093  18CEE421          ldy #L8
+ E097  BDEEB4            jsr __ly2reg
+ E09A  183C              pshy
+ E09C  183C              pshy
+ E09E  1830              tsy
+ E0A0  BDEEF1            jsr __lreg2y
+ E0A3  BDE371            jsr _TimerSleep
+ E0A6  1838              puly
+ E0A8  1838              puly
+ E0AA            ;     OptrexClear();
+ E0AA  BDE490            jsr _OptrexClear
+ E0AD  7EE18C            jmp L10
+ E0B0            L9:
+ E0B0            ; 
+ E0B0            ;     while(1)
+ E0B0            ; 	{
+ E0B0            ;         //----------------
+ E0B0            ;         // update display
+ E0B0            ;         //----------------
+ E0B0            ;         if (gTimerTicks % 50)
+ E0B0  18CE2004          ldy #_gTimerTicks
+ E0B4  BDEEB4            jsr __ly2reg
+ E0B7  18CEE41D          ldy #L14
+ E0BB  BDEEDA            jsr __ly2reg2
+ E0BE  BDF16A            jsr __lmod
+ E0C1  18CEE446          ldy #L4
+ E0C5  BDEEDA            jsr __ly2reg2
+ E0C8  BDF320            jsr __lcmp
+ E0CB  2603              bne X1
+ E0CD  7EE189            jmp L12
+ E0D0            X1:
+ E0D0            ;         {
+ E0D0            ;             OptrexGotoXY(0,0);
+ E0D0  CC0000            ldd #0
+ E0D3  37                pshb
+ E0D4  36                psha
+ E0D5  CC0000            ldd #0
+ E0D8  BDE5D2            jsr _OptrexGotoXY
+ E0DB  1838              puly
+ E0DD            ;             OptrexWriteString("----- Cycling ------");
+ E0DD  CCE408            ldd #L15
+ E0E0  BDE466            jsr _OptrexWriteString
+ E0E3            ; 
+ E0E3            ;             sprintf(tmpstr, "on=%d ms off=%d ms", ON_TIME, OFF_TIME);
+ E0E3  CC0384            ldd #900
+ E0E6  37                pshb
+ E0E7  36                psha
+ E0E8  CC0064            ldd #100
+ E0EB  37                pshb
+ E0EC  36                psha
+ E0ED  CCE3F5            ldd #L16
+ E0F0  37                pshb
+ E0F1  36                psha
+ E0F2  EC00              ldd 0,x
+ E0F4  C30003            addd #3
+ E0F7  BDF383            jsr _sprintf
+ E0FA  BDED2B            jsr __movspb
+ E0FD  06                .byte 6
+ E0FE            ;             OptrexGotoXY(0,1);
+ E0FE  CC0001            ldd #1
+ E101  37                pshb
+ E102  36                psha
+ E103  CC0000            ldd #0
+ E106  BDE5D2            jsr _OptrexGotoXY
+ E109  1838              puly
+ E10B            ;             OptrexWriteString(tmpstr);
+ E10B  EC00              ldd 0,x
+ E10D  C30003            addd #3
+ E110  BDE466            jsr _OptrexWriteString
+ E113            ;             OptrexClearEOL();
+ E113  BDE497            jsr _OptrexClearEOL
+ E116            ; 
+ E116            ;             sprintf(tmpstr, "et=%02d:%02d:%02d", g_etime_hours, g_etime_mins, g_etime_secs);
+ E116  F62010            ldab _g_etime_secs
+ E119  4F                clra
+ E11A  37                pshb
+ E11B  36                psha
+ E11C  F62011            ldab _g_etime_mins
+ E11F  4F                clra
+ E120  37                pshb
+ E121  36                psha
+ E122  FC2012            ldd _g_etime_hours
+ E125  37                pshb
+ E126  36                psha
+ E127  CCE3E3            ldd #L17
+ E12A  37                pshb
+ E12B  36                psha
+ E12C  EC00              ldd 0,x
+ E12E  C30003            addd #3
+ E131  BDF383            jsr _sprintf
+ E134  BDED2B            jsr __movspb
+ E137  08                .byte 8
+ E138            ;             OptrexGotoXY(0,2);
+ E138  CC0002            ldd #2
+ E13B  37                pshb
+ E13C  36                psha
+ E13D  CC0000            ldd #0
+ E140  BDE5D2            jsr _OptrexGotoXY
+ E143  1838              puly
+ E145            ;             OptrexWriteString(tmpstr);
+ E145  EC00              ldd 0,x
+ E147  C30003            addd #3
+ E14A  BDE466            jsr _OptrexWriteString
+ E14D            ; 
+ E14D            ;             sprintf(tmpstr, "odometer=%07ld", g_scycles >> 1);
+ E14D  18CE2018          ldy #_g_scycles
+ E151  BDEEB4            jsr __ly2reg
+ E154  CC0001            ldd #1
+ E157  BDF23B            jsr __luirsh
+ E15A  183C              pshy
+ E15C  183C              pshy
+ E15E  1830              tsy
+ E160  BDEEF1            jsr __lreg2y
+ E163  CCE3D4            ldd #L18
+ E166  37                pshb
+ E167  36                psha
+ E168  EC00              ldd 0,x
+ E16A  C30003            addd #3
+ E16D  BDF383            jsr _sprintf
+ E170  BDED2B            jsr __movspb
+ E173  06                .byte 6
+ E174            ;             OptrexGotoXY(0,3);
+ E174  CC0003            ldd #3
+ E177  37                pshb
+ E178  36                psha
+ E179  CC0000            ldd #0
+ E17C  BDE5D2            jsr _OptrexGotoXY
+ E17F  1838              puly
+ E181            ;             OptrexWriteString(tmpstr);
+ E181  EC00              ldd 0,x
+ E183  C30003            addd #3
+ E186  BDE466            jsr _OptrexWriteString
+ E189            ;         }
+ E189            L12:
+ E189  BDE1A4            jsr _sc_acquire_buttons
+ E18C            L10:
+ E18C  7EE0B0            jmp L9
+ E18F            X0:
+ E18F            ; 
+ E18F            ;         sc_acquire_buttons();
+ E18F            ; 	}
+ E18F            ; }
+ E18F            L3:
+ E18F  8F                xgdx
+ E190  C30018            addd #24
+ E193  8F                xgdx
+ E194  35                txs
+ E195  38                pulx
+ E196                    .dbline 0 ; func end
+ E196  39                rts
+ E197            _sc_init::
+ E197            ; 
+ E197            ; 
+ E197            ; void sc_init(void)
+ E197            ; {
+ E197            ;     sc_set_driver(0);
+ E197  CC0000            ldd #0
+ E19A  BDE1C6            jsr _sc_set_driver
+ E19D            ; 
+ E19D            ;     OptrexInit();
+ E19D  BDE44A            jsr _OptrexInit
+ E1A0            ;     TimerInit();
+ E1A0  BDE208            jsr _TimerInit
+ E1A3            ; }
+ E1A3            L19:
+ E1A3                    .dbline 0 ; func end
+ E1A3  39                rts
+ E1A4            _sc_acquire_buttons::
+ E1A4            ; 
+ E1A4            ; 
+ E1A4            ; void sc_acquire_buttons(void)
+ E1A4            ; {
+ E1A4            ;     //--------------------
+ E1A4            ;     // button acquisition
+ E1A4            ;     //--------------------
+ E1A4            ; 
+ E1A4            ;     old_buttons = new_buttons;
+ E1A4  F62002            ldab _new_buttons
+ E1A7  F72001            stab _old_buttons
+ E1AA            ;     new_buttons = sc_get_buttons();
+ E1AA  BDE1B1            jsr _sc_get_buttons
+ E1AD  F72002            stab _new_buttons
+ E1B0            ; }
+ E1B0            L20:
+ E1B0                    .dbline 0 ; func end
+ E1B0  39                rts
+ E1B1            ;  IX -> 0,x
+ E1B1            ;         retval -> +3,x
+ E1B1            _sc_get_buttons::
+ E1B1  BDED04            jsr __enterb
+ E1B4  04                .byte 0x4
+ E1B5            ; 
+ E1B5            ; 
+ E1B5            ; unsigned char sc_get_buttons(void)
+ E1B5            ; {
+ E1B5            ;     unsigned char retval;
+ E1B5            ; 
+ E1B5            ;     retval = PORTA & 0x3;
+ E1B5                    ; vol
+ E1B5  F61000            ldab 0x1000
+ E1B8  C403              andb #3
+ E1BA  E703              stab 3,x
+ E1BC            ; 
+ E1BC            ;     return (retval);
+ E1BC  E603              ldab 3,x
+ E1BE  4F                clra
+ E1BF            L21:
+ E1BF  08                inx
+ E1C0  08                inx
+ E1C1  08                inx
+ E1C2  08                inx
+ E1C3  35                txs
+ E1C4  38                pulx
+ E1C5                    .dbline 0 ; func end
+ E1C5  39                rts
+ E1C6            ;  IX -> 0,x
+ E1C6            ;  rMEM -> 2,x
+ E1C6            ;           stat -> +5,x
+ E1C6            ;            val -> +9,x
+ E1C6            _sc_set_driver::
+ E1C6  BDED04            jsr __enterb
+ E1C9  46                .byte 0x46
+ E1CA            ; }
+ E1CA            ; 
+ E1CA            ; void sc_set_driver(unsigned char val)
+ E1CA            ; {
+ E1CA            ;     unsigned char stat;
+ E1CA            ; 
+ E1CA            ;     val &= 0x03;
+ E1CA  1D09FC            bclr 9,x,#0xfc
+ E1CD            ;     stat = sc_get_driver();
+ E1CD  BDE1FA            jsr _sc_get_driver
+ E1D0  E705              stab 5,x
+ E1D2            ; 
+ E1D2            ;     if (stat != val)
+ E1D2  E605              ldab 5,x
+ E1D4  E109              cmpb 9,x
+ E1D6  2718              beq L23
+ E1D8            ;     {
+ E1D8            ;         PORTA &= ~0x30;                 // prevent any shoot through
+ E1D8  18CE1000          ldy #0x1000
+ E1DC  181D0030          bclr 0,y,#0x30
+ E1E0            ;         PORTA |= (val << 4);
+ E1E0  E609              ldab 9,x
+ E1E2  58                lslb
+ E1E3  58                lslb
+ E1E4  58                lslb
+ E1E5  58                lslb
+ E1E6  E702              stab 2,x
+ E1E8                    ; vol
+ E1E8  F61000            ldab 0x1000
+ E1EB  EA02              orab 2,x
+ E1ED  F71000            stab 0x1000
+ E1F0            ;     }
+ E1F0            L23:
+ E1F0            ; 
+ E1F0            ; }
+ E1F0            L22:
+ E1F0  8F                xgdx
+ E1F1  C30006            addd #6
+ E1F4  8F                xgdx
+ E1F5  35                txs
+ E1F6  38                pulx
+ E1F7  1838              puly
+ E1F9                    .dbline 0 ; func end
+ E1F9  39                rts
+ E1FA            _sc_get_driver::
+ E1FA            ; 
+ E1FA            ; unsigned char sc_get_driver(void)
+ E1FA            ; {
+ E1FA            ;     return ((PORTA >> 4) & 0x03);
+ E1FA            	; vol
+ E1FA  F61000            ldab 0x1000
+ E1FD  4F                clra
+ E1FE  04                lsrd
+ E1FF  04                lsrd
+ E200  04                lsrd
+ E201  04                lsrd
+ E202  8400              anda #0
+ E204  C403              andb #3
+ E206  4F                clra
+ E207            L25:
+ E207                    .dbline 0 ; func end
+ E207  39                rts
+ E208            ;  lreg1 -> -4,x
+ E208            ;  lreg2 -> -8,x
+ E208            ;  IX -> 0,x
+ E208            _TimerInit::
+ E208  BDED04            jsr __enterb
+ E20B  82                .byte 0x82
+ E20C            ; }
+ E20C            ; 
+ E20C            ; 
+ E20C            ; #pragma interrupt_handler TimerTOC2Isr
+ E20C            ; 
+ E20C            ; void TimerInit(void)
+ E20C            ; {
+ E20C            ;     TMSK1 = OC2F;                       // enable interrupts on OC2
+ E20C  C640              ldab #64
+ E20E  F71022            stab 0x1022
+ E211            ;     TCTL1 = 0x00;                       // setup OC2 for n.c.
+ E211  7F1020            clr 0x1020
+ E214            ; 
+ E214            ;     gTimerTicks = 0;
+ E214  18CEE446          ldy #L4
+ E218  BDEEB4            jsr __ly2reg
+ E21B  18CE2004          ldy #_gTimerTicks
+ E21F  BDEEF1            jsr __lreg2y
+ E222            ;     gTimerSeconds = 0;
+ E222  18CEE442          ldy #L5
+ E226  BDEEB4            jsr __ly2reg
+ E229  18CE2014          ldy #_gTimerSeconds
+ E22D  BDEEF1            jsr __lreg2y
+ E230            ; 
+ E230            ;     INTR_ON();
+ E230  0E                                cli
+ E231            
+ E231            ; }
+ E231            L26:
+ E231  08                inx
+ E232  08                inx
+ E233  35                txs
+ E234  38                pulx
+ E235                    .dbline 0 ; func end
+ E235  39                rts
+                        .area data
+--- 0000           L28:
+--- 0000                   .blkb 1
+                        .area idata
+--- 0000 00                .byte 0
+                        .area data
+                        .area text
+                ;  lreg1 -> -4,x
+                ;  lreg2 -> -8,x
+                ;  IX -> 0,x
+                ;          ?temp -> +2,x
+                ;              i -> +4,x
+                ;    log_current -> +5,x
+ E236            _TimerTOC2Isr::
+ E236  BDED04            jsr __enterb
+ E239  86                .byte 0x86
+ E23A            ; 
+ E23A            ; void TimerTOC2Isr()
+ E23A            ; {
+ E23A            ;     static char gTimerTOC2 = 0;
+ E23A            ;     unsigned char log_current = 0;
+ E23A  6F05              clr 5,x
+ E23C            ;     unsigned char i;
+ E23C            ; 
+ E23C            ;     TFLG1 = OC2F;                       // clear compare flag
+ E23C  C640              ldab #64
+ E23E  F71023            stab 0x1023
+ E241            ;     TOC2 = TCNT + 20000;                // setup next interrupt 10 msec later
+ E241                    ; vol
+ E241  FC100E            ldd 0x100e
+ E244  C34E20            addd #20000
+ E247  FD1018            std 0x1018
+ E24A            ; 
+ E24A            ;     gTimerTicks++;
+ E24A  18CE2004          ldy #_gTimerTicks
+ E24E  BDEEB4            jsr __ly2reg
+ E251  18CEE3D0          ldy #L29
+ E255  BDEEDA            jsr __ly2reg2
+ E258  BDF031            jsr __ladd
+ E25B  18CE2004          ldy #_gTimerTicks
+ E25F  BDEEF1            jsr __lreg2y
+ E262            ;     gTimerTOC2++;                       // advance 10 msec counter
+ E262  F62000            ldab L28
+ E265  CB01              addb #1
+ E267  F72000            stab L28
+ E26A            ; 
+ E26A            ;     if (gTimerTOC2 >= 100)              // check for 100 & 10 msec
+ E26A  F62000            ldab L28
+ E26D  C164              cmpb #100
+ E26F  2548              blo L30
+ E271            ;     {
+ E271            ;         gTimerTOC2 = 0;
+ E271  7F2000            clr L28
+ E274            ; 
+ E274            ;         g_etime_secs++;
+ E274  F62010            ldab _g_etime_secs
+ E277  CB01              addb #1
+ E279  F72010            stab _g_etime_secs
+ E27C            ; 
+ E27C            ;         if (g_etime_secs > 59)
+ E27C  F62010            ldab _g_etime_secs
+ E27F  C13B              cmpb #59
+ E281  230B              bls L32
+ E283            ;         {
+ E283            ;             g_etime_secs = 0;
+ E283  7F2010            clr _g_etime_secs
+ E286            ;             g_etime_mins++;
+ E286  F62011            ldab _g_etime_mins
+ E289  CB01              addb #1
+ E28B  F72011            stab _g_etime_mins
+ E28E            ;         }
+ E28E            L32:
+ E28E            ; 
+ E28E            ;         if (g_etime_mins > 59)
+ E28E  F62011            ldab _g_etime_mins
+ E291  C13B              cmpb #59
+ E293  230C              bls L34
+ E295            ;         {
+ E295            ;             g_etime_mins = 0;
+ E295  7F2011            clr _g_etime_mins
+ E298            ;             g_etime_hours++;
+ E298  FC2012            ldd _g_etime_hours
+ E29B  C30001            addd #1
+ E29E  FD2012            std _g_etime_hours
+ E2A1            ;         }
+ E2A1            L34:
+ E2A1            ; 
+ E2A1            ;         gTimerSeconds++;                // advance seconds
+ E2A1  18CE2014          ldy #_gTimerSeconds
+ E2A5  BDEEB4            jsr __ly2reg
+ E2A8  18CEE3CC          ldy #L36
+ E2AC  BDEEDA            jsr __ly2reg2
+ E2AF  BDF031            jsr __ladd
+ E2B2  18CE2014          ldy #_gTimerSeconds
+ E2B6  BDEEF1            jsr __lreg2y
+ E2B9            ;     }
+ E2B9            L30:
+ E2B9            ; 
+ E2B9            ;     //------------------------
+ E2B9            ;     // process solenoid stuff
+ E2B9            ;     //------------------------
+ E2B9            ; 
+ E2B9            ; 
+ E2B9            ;     if (gTimerTicks > gFlipTarget)  // flip target reached?
+ E2B9  18CE2004          ldy #_gTimerTicks
+ E2BD  BDEEB4            jsr __ly2reg
+ E2C0  18CE200C          ldy #_gFlipTarget
+ E2C4  BDEEDA            jsr __ly2reg2
+ E2C7  BDF320            jsr __lcmp
+ E2CA  2E03              bgt X3
+ E2CC  7EE349            jmp L37
+ E2CF            X3:
+ E2CF            ;     {
+ E2CF            ;         // calculate new pulse and flip target
+ E2CF            ; 
+ E2CF            ;         gPulseTarget = gTimerTicks + (ON_TIME / 10);
+ E2CF  18CE2004          ldy #_gTimerTicks
+ E2D3  BDEEB4            jsr __ly2reg
+ E2D6  18CEE3C8          ldy #L39
+ E2DA  BDEEDA            jsr __ly2reg2
+ E2DD  BDF031            jsr __ladd
+ E2E0  18CE2008          ldy #_gPulseTarget
+ E2E4  BDEEF1            jsr __lreg2y
+ E2E7            ;         gFlipTarget = gPulseTarget + (OFF_TIME / 10);
+ E2E7  18CE2008          ldy #_gPulseTarget
+ E2EB  BDEEB4            jsr __ly2reg
+ E2EE  18CEE3C4          ldy #L40
+ E2F2  BDEEDA            jsr __ly2reg2
+ E2F5  BDF031            jsr __ladd
+ E2F8  18CE200C          ldy #_gFlipTarget
+ E2FC  BDEEF1            jsr __lreg2y
+ E2FF            ; 
+ E2FF            ;         // flip h-bridge
+ E2FF            ;         g_flipside ^= 1;
+ E2FF  F62003            ldab _g_flipside
+ E302  C801              eorb #1
+ E304  F72003            stab _g_flipside
+ E307            ; 
+ E307            ;         switch (g_flipside)
+ E307  F62003            ldab _g_flipside
+ E30A  4F                clra
+ E30B  ED02              std 2,x
+ E30D  270A              beq L44
+ E30F  EC02              ldd 2,x
+ E311  1A830001          cpd #1
+ E315  270A              beq L45
+ E317  2010              bra L41
+ E319            X2:
+ E319            ;         {
+ E319            L44:
+ E319            ;             case 0: sc_set_driver(1); break;
+ E319  CC0001            ldd #1
+ E31C  BDE1C6            jsr _sc_set_driver
+ E31F  200E              bra L42
+ E321            L45:
+ E321            ;             case 1: sc_set_driver(2); break;
+ E321  CC0002            ldd #2
+ E324  BDE1C6            jsr _sc_set_driver
+ E327  2006              bra L42
+ E329            L41:
+ E329            ;             default: sc_set_driver(0); break;
+ E329  CC0000            ldd #0
+ E32C  BDE1C6            jsr _sc_set_driver
+ E32F            L42:
+ E32F            ;         }
+ E32F            ; 
+ E32F            ;         g_scycles++;        // increment cycle counter
+ E32F  18CE2018          ldy #_g_scycles
+ E333  BDEEB4            jsr __ly2reg
+ E336  18CEE3CC          ldy #L36
+ E33A  BDEEDA            jsr __ly2reg2
+ E33D  BDF031            jsr __ladd
+ E340  18CE2018          ldy #_g_scycles
+ E344  BDEEF1            jsr __lreg2y
+ E347            ;     }
+ E347  2020              bra L38
+ E349            L37:
+ E349            ;     else                            // not time to flip yet
+ E349            ;     {
+ E349            ;         if (sc_get_driver())        // if pulse is still on...
+ E349  BDE1FA            jsr _sc_get_driver
+ E34C  C100              cmpb #0
+ E34E  2719              beq L46
+ E350            ;         {
+ E350            ;             if (gTimerTicks > gPulseTarget) // pulse target reached?
+ E350  18CE2004          ldy #_gTimerTicks
+ E354  BDEEB4            jsr __ly2reg
+ E357  18CE2008          ldy #_gPulseTarget
+ E35B  BDEEDA            jsr __ly2reg2
+ E35E  BDF320            jsr __lcmp
+ E361  2F06              ble L48
+ E363            ;             {
+ E363            ;                 sc_set_driver(0);   // turn off pulse
+ E363  CC0000            ldd #0
+ E366  BDE1C6            jsr _sc_set_driver
+ E369            ;             }
+ E369            L48:
+ E369            ;         }
+ E369            L46:
+ E369            ;     }
+ E369            L38:
+ E369            ; }
+ E369            L27:
+ E369  8F                xgdx
+ E36A  C30006            addd #6
+ E36D  8F                xgdx
+ E36E  35                txs
+ E36F  38                pulx
+ E370                    .dbline 0 ; func end
+ E370  3B                rti
+ E371            ;  lreg1 -> -4,x
+ E371            ;  lreg2 -> -8,x
+ E371            ;  IX -> 0,x
+ E371            ;         target -> +2,x
+ E371            ;           msec -> +10,x
+ E371            _TimerSleep::
+ E371  BDED04            jsr __enterb
+ E374  86                .byte 0x86
+ E375            ; 
+ E375            ; 
+ E375            ; void TimerSleep(long msec)
+ E375            ; {
+ E375            ;     long target;
+ E375            ; 
+ E375            ;     target = gTimerTicks + (msec / 10);
+ E375  EC00              ldd 0,x
+ E377  C3000A            addd #10
+ E37A  188F              xgdy
+ E37C  BDEEB4            jsr __ly2reg
+ E37F  18CEE3C8          ldy #L39
+ E383  BDEEDA            jsr __ly2reg2
+ E386  BDF12F            jsr __ldiv
+ E389  BDEF1F            jsr __lregmov
+ E38C  18CE2004          ldy #_gTimerTicks
+ E390  BDEEB4            jsr __ly2reg
+ E393  BDF031            jsr __ladd
+ E396  EC00              ldd 0,x
+ E398  C30002            addd #2
+ E39B  188F              xgdy
+ E39D  BDEEF1            jsr __lreg2y
+ E3A0            L51:
+ E3A0            L52:
+ E3A0            ; 
+ E3A0            ;     while(target > gTimerTicks);
+ E3A0  EC00              ldd 0,x
+ E3A2  C30002            addd #2
+ E3A5  188F              xgdy
+ E3A7  BDEEB4            jsr __ly2reg
+ E3AA  18CE2004          ldy #_gTimerTicks
+ E3AE  BDEEDA            jsr __ly2reg2
+ E3B1  BDF320            jsr __lcmp
+ E3B4  2EEA              bgt L51
+ E3B6            ; }
+ E3B6            L50:
+ E3B6  8F                xgdx
+ E3B7  C30006            addd #6
+ E3BA  8F                xgdx
+ E3BB  35                txs
+ E3BC  38                pulx
+ E3BD                    .dbline 0 ; func end
+ E3BD  39                rts
+ E3BE            __HC11Setup::
+ E3BE            ; 
+ E3BE            ; 
+ E3BE            ; #define DUMMY_ENTRY	(void (*)())0xFFFF
+ E3BE            ; 
+ E3BE            ; void _HC11Setup(void)
+ E3BE            ; {
+ E3BE            ;     CONFIG = 0x05;
+ E3BE  C605              ldab #5
+ E3C0  F7103F            stab 0x103f
+ E3C3            ; }
+ E3C3            L54:
+ E3C3                    .dbline 0 ; func end
+ E3C3  39                rts
+                        .area memory(abs)
+                        .org 0xffd6
+ FFD6            _interrupt_vectors::
+ FFD6  FFFF              .word 65535
+ FFD8  FFFF              .word 65535
+ FFDA  FFFF              .word 65535
+ FFDC  FFFF              .word 65535
+ FFDE  FFFF              .word 65535
+ FFE0  FFFF              .word 65535
+ FFE2  FFFF              .word 65535
+ FFE4  FFFF              .word 65535
+ FFE6  E236              .word _TimerTOC2Isr
+ FFE8  FFFF              .word 65535
+ FFEA  FFFF              .word 65535
+ FFEC  FFFF              .word 65535
+ FFEE  FFFF              .word 65535
+ FFF0  FFFF              .word 65535
+ FFF2  FFFF              .word 65535
+ FFF4  FFFF              .word 65535
+ FFF6  FFFF              .word 65535
+ FFF8  FFFF              .word 65535
+ FFFA  FFFF              .word 65535
+ FFFC  FFFF              .word 65535
+ FFFE  E000              .word __start
+                        .area data
+                        .area bss
+ 2001            _old_buttons::
+ 2001                    .blkb 1
+ 2002            _new_buttons::
+ 2002                    .blkb 1
+ 2003            _g_flipside::
+ 2003                    .blkb 1
+ 2004            _gTimerTicks::
+ 2004                    .blkb 4
+ 2008            _gPulseTarget::
+ 2008                    .blkb 4
+ 200C            _gFlipTarget::
+ 200C                    .blkb 4
+ 2010            _g_etime_secs::
+ 2010                    .blkb 1
+ 2011            _g_etime_mins::
+ 2011                    .blkb 1
+ 2012            _g_etime_hours::
+ 2012                    .blkb 2
+ 2014            _gTimerSeconds::
+ 2014                    .blkb 4
+ 2018            _g_scycles::
+ 2018                    .blkb 4
+                        .area text
+--- 0395           L40:
+--- 0395 0000005A          .word 0,90
+--- 0399           L39:
+--- 0399 0000000A          .word 0,10
+--- 039D           L36:
+--- 039D 00000001          .word 0,1
+--- 03A1           L29:
+--- 03A1 00000001          .word 0,1
+--- 03A5           L18:
+--- 03A5 6F646F6D657465723D2530376C6400    .byte 'o,'d,'o,'m,'e,'t,'e,'r,61,37,48,55,'l,'d,0
+--- 03B4           L17:
+--- 03B4 65743D253032643A253032643A253032  .byte 'e,'t,61,37,48,50,'d,58,37,48,50,'d,58,37,48,50
+--- 03C4 6400              .byte 'd,0
+--- 03C6           L16:
+--- 03C6 6F6E3D2564206D73206F66663D256420  .byte 'o,'n,61,37,'d,32,'m,'s,32,'o,'f,'f,61,37,'d,32
+--- 03D6 6D7300            .byte 'm,'s,0
+--- 03D9           L15:
+--- 03D9 2D2D2D2D2D204379636C696E67202D2D  .byte 45,45,45,45,45,32,'C,'y,'c,'l,'i,'n,'g,32,45,45
+--- 03E9 2D2D2D2D00        .byte 45,45,45,45,0
+--- 03EE           L14:
+--- 03EE 00000032          .word 0,50
+--- 03F2           L8:
+--- 03F2 00000BB8          .word 0,3000
+--- 03F6           L7:
+--- 03F6 56657273696F6E20312E303000        .byte 'V,'e,'r,'s,'i,'o,'n,32,49,46,48,48,0
+--- 0403           L6:
+--- 0403 5448322053687574746572204A696700  .byte 'T,'H,50,32,'S,'h,'u,'t,'t,'e,'r,32,'J,'i,'g,0
+--- 0413           L5:
+--- 0413 00000000          .word 0,0
+--- 0417           L4:
+--- 0417 00000000          .word 0,0
+                        .module lib_optrex.c
+                        .area text
+ E44A            _OptrexInit::
+ E44A            ;  
+ E44A            ; //===========================================================================
+ E44A            ; //
+ E44A            ; //      File:       OPTREX_LIB.C
+ E44A            ; //
+ E44A            ; //      Purpose:    Axiom 68HC11 LCD Routines for Optrex Displays
+ E44A            ; //
+ E44A            ; //      Version:    1.20
+ E44A            ; //
+ E44A            ; //      Date:       March 13, 2001
+ E44A            ; //
+ E44A            ; //      Author:     Wayne Mah
+ E44A            ; //
+ E44A            ; //      Compiler:   ImageCraft C
+ E44A            ; //
+ E44A            ; //---------------------------------------------------------------------------
+ E44A            ; //
+ E44A            ; //      History:    0.90    99/01/31    Genesis
+ E44A            ; //                  1.00    00/12/10    Update
+ E44A            ; //                  1.10    01/02/17    Update
+ E44A            ; //                  1.11    01/03/11    Renamed to OPTREX_LIB.C
+ E44A            ; //                  1.20    01/03/12    Update
+ E44A            ; //
+ E44A            ; //===========================================================================
+ E44A            ; 
+ E44A            ; #include <stdio.h>
+ E44A            ; #include <lib_optrex.h>
+ E44A            ; 
+ E44A            ; //----------------------------------------------
+ E44A            ; //  LCD is memory mapped on the CMD/CMM boards
+ E44A            ; //----------------------------------------------
+ E44A            ; 
+ E44A            ; #define OPTREX_CMDREG  *(unsigned char volatile *)(0xB5F0)
+ E44A            ; #define OPTREX_DATAREG *(unsigned char volatile *)(0xB5F1)
+ E44A            ; 
+ E44A            ; 
+ E44A            ; //---------------
+ E44A            ; //  local globs
+ E44A            ; //---------------
+ E44A            ; 
+ E44A            ; unsigned char g_dispmode;
+ E44A            ; 
+ E44A            ; 
+ E44A            ; //-----------------------------
+ E44A            ; //  Local Function Prototypes
+ E44A            ; //-----------------------------
+ E44A            ; 
+ E44A            ; void OptrexBusy(void);
+ E44A            ; 
+ E44A            ; 
+ E44A            ; 
+ E44A            ; //---------------------------------------------------------------------------
+ E44A            ; //  LCD Initialization
+ E44A            ; //---------------------------------------------------------------------------
+ E44A            ; 
+ E44A            ; void OptrexInit(void)
+ E44A            ; {
+ E44A            ;     g_dispmode = 0x0c;
+ E44A  C60C              ldab #12
+ E44C  F7201C            stab _g_dispmode
+ E44F            ; 
+ E44F            ;     OptrexCommand(0x3C);                   // initialize command
+ E44F  CC003C            ldd #60
+ E452  BDE621            jsr _OptrexCommand
+ E455            ;     OptrexCommand(g_dispmode);             // display on, cursor off
+ E455  F6201C            ldab _g_dispmode
+ E458  4F                clra
+ E459  BDE621            jsr _OptrexCommand
+ E45C            ;     OptrexCommand(0x06);
+ E45C  CC0006            ldd #6
+ E45F  BDE621            jsr _OptrexCommand
+ E462            ; 
+ E462            ;     OptrexClear();
+ E462  BDE490            jsr _OptrexClear
+ E465            ; }
+ E465            L1:
+ E465                    .dbline 0 ; func end
+ E465  39                rts
+ E466            ;  IX -> 0,x
+ E466            ;          ?temp -> +2,x
+ E466            ;           sptr -> +6,x
+ E466            _OptrexWriteString::
+ E466  BDED04            jsr __enterb
+ E469  44                .byte 0x44
+ E46A            ; 
+ E46A            ; 
+ E46A            ; void OptrexWriteString(char *sptr)
+ E46A            ; {
+ E46A  2013              bra L4
+ E46C            L3:
+ E46C  EC06              ldd 6,x
+ E46E  ED02              std 2,x
+ E470  C30001            addd #1
+ E473  ED06              std 6,x
+ E475  1AEE02            ldy 2,x
+ E478  18E600            ldab 0,y
+ E47B  4F                clra
+ E47C  BDE5BC            jsr _OptrexWrite
+ E47F            L4:
+ E47F            ; 	while(*sptr)
+ E47F  1AEE06            ldy 6,x
+ E482  186D00            tst 0,y
+ E485  26E5              bne L3
+ E487            ;               OptrexWrite(*sptr++);
+ E487            ; }
+ E487            L2:
+ E487  08                inx
+ E488  08                inx
+ E489  08                inx
+ E48A  08                inx
+ E48B  35                txs
+ E48C  38                pulx
+ E48D  1838              puly
+ E48F                    .dbline 0 ; func end
+ E48F  39                rts
+ E490            _OptrexClear::
+ E490            ; 
+ E490            ; 
+ E490            ; 
+ E490            ; //-----------------------------------------------------------------------
+ E490            ; //
+ E490            ; //  OptrexClear()
+ E490            ; //
+ E490            ; //  Writes the space code 0x20 into all addresses of DDRAM.  Returns
+ E490            ; //  display to its original position if it was shifted.  In other words,
+ E490            ; //  the display clears and the cursor or blink moves to the upper left
+ E490            ; //  edge of the display.  The execution of clear display set entry mode
+ E490            ; //  to incremental mode.
+ E490            ; //
+ E490            ; //-----------------------------------------------------------------------
+ E490            ; 
+ E490            ; void OptrexClear(void)
+ E490            ; {
+ E490            ;     OptrexCommand(0x01);
+ E490  CC0001            ldd #1
+ E493  BDE621            jsr _OptrexCommand
+ E496            ; }
+ E496            L6:
+ E496                    .dbline 0 ; func end
+ E496  39                rts
+ E497            ;  IX -> 0,x
+ E497            ;     start_addr -> +3,x
+ E497            ;       end_addr -> +4,x
+ E497            ;              i -> +5,x
+ E497            _OptrexClearEOL::
+ E497  BDED04            jsr __enterb
+ E49A  06                .byte 0x6
+ E49B            ; 
+ E49B            ; void OptrexClearEOL(void)
+ E49B            ; {
+ E49B            ;     unsigned char start_addr, end_addr, i;
+ E49B            ; 
+ E49B            ;     start_addr = OptrexGetAddress();
+ E49B  BDE5B5            jsr _OptrexGetAddress
+ E49E  E703              stab 3,x
+ E4A0            ; 
+ E4A0            ;     if (start_addr >= 0x00 && start_addr <= 0x13)
+ E4A0  6D03              tst 3,x
+ E4A2  250C              blo L8
+ E4A4  E603              ldab 3,x
+ E4A6  C113              cmpb #19
+ E4A8  2206              bhi L8
+ E4AA            ;     {
+ E4AA            ;         end_addr = 0x13;
+ E4AA  C613              ldab #19
+ E4AC  E704              stab 4,x
+ E4AE            ;     }
+ E4AE  2022              bra L9
+ E4B0            L8:
+ E4B0            ;     else if (start_addr >= 0x40 && start_addr <= 0x53)
+ E4B0  E603              ldab 3,x
+ E4B2  C140              cmpb #64
+ E4B4  250C              blo L10
+ E4B6  E603              ldab 3,x
+ E4B8  C153              cmpb #83
+ E4BA  2206              bhi L10
+ E4BC            ;     {
+ E4BC            ;         end_addr = 0x53;
+ E4BC  C653              ldab #83
+ E4BE  E704              stab 4,x
+ E4C0            ;     }
+ E4C0  2010              bra L11
+ E4C2            L10:
+ E4C2            ;     else if (start_addr >= 0x14 && start_addr <= 0x27)
+ E4C2  E603              ldab 3,x
+ E4C4  C114              cmpb #20
+ E4C6  250A              blo L12
+ E4C8  E603              ldab 3,x
+ E4CA  C127              cmpb #39
+ E4CC  2204              bhi L12
+ E4CE            ;     {
+ E4CE            ;         end_addr = 0x27;
+ E4CE  C627              ldab #39
+ E4D0  E704              stab 4,x
+ E4D2            ;     }
+ E4D2            L12:
+ E4D2            L11:
+ E4D2            L9:
+ E4D2            ;     if (start_addr >= 0x54 && start_addr <= 0x67)
+ E4D2  E603              ldab 3,x
+ E4D4  C154              cmpb #84
+ E4D6  250A              blo L14
+ E4D8  E603              ldab 3,x
+ E4DA  C167              cmpb #103
+ E4DC  2204              bhi L14
+ E4DE            ;     {
+ E4DE            ;         end_addr = 0x67;
+ E4DE  C667              ldab #103
+ E4E0  E704              stab 4,x
+ E4E2            ;     }
+ E4E2            L14:
+ E4E2            ; 
+ E4E2            ;     for (i = start_addr; i <= end_addr; i++)
+ E4E2  E603              ldab 3,x
+ E4E4  E705              stab 5,x
+ E4E6  200C              bra L19
+ E4E8            L16:
+ E4E8  CC0020            ldd #32
+ E4EB  BDE5BC            jsr _OptrexWrite
+ E4EE            L17:
+ E4EE  E605              ldab 5,x
+ E4F0  CB01              addb #1
+ E4F2  E705              stab 5,x
+ E4F4            L19:
+ E4F4  E605              ldab 5,x
+ E4F6  E104              cmpb 4,x
+ E4F8  23EE              bls L16
+ E4FA            ;     {
+ E4FA            ;         OptrexWrite(' ');
+ E4FA            ;     }
+ E4FA            ; 
+ E4FA            ;     OptrexSetAddress(start_addr);
+ E4FA  E603              ldab 3,x
+ E4FC  4F                clra
+ E4FD  BDE59F            jsr _OptrexSetAddress
+ E500            ; }
+ E500            L7:
+ E500  8F                xgdx
+ E501  C30006            addd #6
+ E504  8F                xgdx
+ E505  35                txs
+ E506  38                pulx
+ E507                    .dbline 0 ; func end
+ E507  39                rts
+ E508            _OptrexHome::
+ E508            ; 
+ E508            ; 
+ E508            ; 
+ E508            ; 
+ E508            ; //-----------------------------------------------------------------------
+ E508            ; //
+ E508            ; //  OptrexHome()
+ E508            ; //
+ E508            ; //  Set the DDRAM address "0" in address counter.  Return display to its
+ E508            ; //  original position if it was shifted.  DDRAM contents do not change.
+ E508            ; //
+ E508            ; //  The cursor or the blink moves to teh upper left edge of the display.
+ E508            ; //  Text on the display remains unchanged.
+ E508            ; //
+ E508            ; //-----------------------------------------------------------------------
+ E508            ; 
+ E508            ; void OptrexHome(void)
+ E508            ; {
+ E508            ;     OptrexCommand(0x02);
+ E508  CC0002            ldd #2
+ E50B  BDE621            jsr _OptrexCommand
+ E50E            ; }
+ E50E            L20:
+ E50E                    .dbline 0 ; func end
+ E50E  39                rts
+ E50F            ;  IX -> 0,x
+ E50F            ;           mode -> +5,x
+ E50F            _OptrexEntryMode::
+ E50F  37                pshb
+ E510  36                psha
+ E511  3C                pshx
+ E512  3C                pshx
+ E513  30                tsx
+ E514  EF00              stx 0,x
+ E516            ; 
+ E516            ; 
+ E516            ; //-----------------------------------------------------------------------
+ E516            ; //
+ E516            ; //  OptrexEntryMode()
+ E516            ; //
+ E516            ; //  Sets the INC/DEC and shift modes to the desired settings.
+ E516            ; //
+ E516            ; //  Bit 1 = 1 increments, Bit1 = 0 decrements the DDRAM address by 1
+ E516            ; //  when a character code is written into or read from the DDRAM
+ E516            ; //
+ E516            ; //-----------------------------------------------------------------------
+ E516            ;  void OptrexEntryMode(char mode)
+ E516            ; {
+ E516            ;     OptrexCommand(0x04|(0x03&mode));
+ E516  E605              ldab 5,x
+ E518  C403              andb #3
+ E51A  CA04              orab #4
+ E51C  4F                clra
+ E51D  BDE621            jsr _OptrexCommand
+ E520            ; }
+ E520            L21:
+ E520  08                inx
+ E521  08                inx
+ E522  35                txs
+ E523  38                pulx
+ E524  1838              puly
+ E526                    .dbline 0 ; func end
+ E526  39                rts
+ E527            ;  IX -> 0,x
+ E527            ;  rMEM -> 2,x
+ E527            ;            val -> +7,x
+ E527            _OptrexSetBlink::
+ E527  BDED04            jsr __enterb
+ E52A  44                .byte 0x44
+ E52B            ; 
+ E52B            ; 
+ E52B            ; void OptrexSetBlink(char val)
+ E52B            ; {
+ E52B            ;     OptrexSetDisplayControl((g_dispmode & ~0x01) | (val & 1));
+ E52B  E607              ldab 7,x
+ E52D  C401              andb #1
+ E52F  E702              stab 2,x
+ E531  F6201C            ldab _g_dispmode
+ E534  C4FE              andb #-2
+ E536  EA02              orab 2,x
+ E538  4F                clra
+ E539  BDE584            jsr _OptrexSetDisplayControl
+ E53C            ; }
+ E53C            L22:
+ E53C  08                inx
+ E53D  08                inx
+ E53E  08                inx
+ E53F  08                inx
+ E540  35                txs
+ E541  38                pulx
+ E542  1838              puly
+ E544                    .dbline 0 ; func end
+ E544  39                rts
+ E545            ;  IX -> 0,x
+ E545            ;  rMEM -> 2,x
+ E545            ;            val -> +7,x
+ E545            _OptrexSetCursor::
+ E545  BDED04            jsr __enterb
+ E548  44                .byte 0x44
+ E549            ; 
+ E549            ; void OptrexSetCursor(char val)
+ E549            ; {
+ E549            ;     OptrexSetDisplayControl((g_dispmode & ~0x02) | ((val & 1) << 1));
+ E549  E607              ldab 7,x
+ E54B  C401              andb #1
+ E54D  58                lslb
+ E54E  E702              stab 2,x
+ E550  F6201C            ldab _g_dispmode
+ E553  C4FD              andb #-3
+ E555  EA02              orab 2,x
+ E557  4F                clra
+ E558  BDE584            jsr _OptrexSetDisplayControl
+ E55B            ; }
+ E55B            L23:
+ E55B  08                inx
+ E55C  08                inx
+ E55D  08                inx
+ E55E  08                inx
+ E55F  35                txs
+ E560  38                pulx
+ E561  1838              puly
+ E563                    .dbline 0 ; func end
+ E563  39                rts
+ E564            ;  IX -> 0,x
+ E564            ;  rMEM -> 2,x
+ E564            ;            val -> +7,x
+ E564            _OptrexSetDisplay::
+ E564  BDED04            jsr __enterb
+ E567  44                .byte 0x44
+ E568            ; 
+ E568            ; void OptrexSetDisplay(char val)
+ E568            ; {
+ E568            ;     OptrexSetDisplayControl((g_dispmode & ~0x04) | ((val & 1) << 2));
+ E568  E607              ldab 7,x
+ E56A  C401              andb #1
+ E56C  58                lslb
+ E56D  58                lslb
+ E56E  E702              stab 2,x
+ E570  F6201C            ldab _g_dispmode
+ E573  C4FB              andb #-5
+ E575  EA02              orab 2,x
+ E577  4F                clra
+ E578  BDE584            jsr _OptrexSetDisplayControl
+ E57B            ; }
+ E57B            L24:
+ E57B  08                inx
+ E57C  08                inx
+ E57D  08                inx
+ E57E  08                inx
+ E57F  35                txs
+ E580  38                pulx
+ E581  1838              puly
+ E583                    .dbline 0 ; func end
+ E583  39                rts
+ E584            ;  IX -> 0,x
+ E584            ;            val -> +5,x
+ E584            _OptrexSetDisplayControl::
+ E584  37                pshb
+ E585  36                psha
+ E586  3C                pshx
+ E587  3C                pshx
+ E588  30                tsx
+ E589  EF00              stx 0,x
+ E58B            ; 
+ E58B            ; void OptrexSetDisplayControl(char val)
+ E58B            ; {
+ E58B            ;     OptrexCommand(0x08|val);
+ E58B  E605              ldab 5,x
+ E58D  CA08              orab #8
+ E58F  4F                clra
+ E590  BDE621            jsr _OptrexCommand
+ E593            ;     
+ E593            ;     g_dispmode = val;
+ E593  E605              ldab 5,x
+ E595  F7201C            stab _g_dispmode
+ E598            ; }
+ E598            L25:
+ E598  08                inx
+ E599  08                inx
+ E59A  35                txs
+ E59B  38                pulx
+ E59C  1838              puly
+ E59E                    .dbline 0 ; func end
+ E59E  39                rts
+ E59F            ;  IX -> 0,x
+ E59F            ;           addr -> +5,x
+ E59F            _OptrexSetAddress::
+ E59F  37                pshb
+ E5A0  36                psha
+ E5A1  3C                pshx
+ E5A2  3C                pshx
+ E5A3  30                tsx
+ E5A4  EF00              stx 0,x
+ E5A6            ; 
+ E5A6            ; void OptrexSetAddress(unsigned char addr)
+ E5A6            ; {
+ E5A6            ;     OptrexCommand(0x80|addr);              // set DDRAM address
+ E5A6  E605              ldab 5,x
+ E5A8  CA80              orab #128
+ E5AA  4F                clra
+ E5AB  BDE621            jsr _OptrexCommand
+ E5AE            ; }
+ E5AE            L26:
+ E5AE  08                inx
+ E5AF  08                inx
+ E5B0  35                txs
+ E5B1  38                pulx
+ E5B2  1838              puly
+ E5B4                    .dbline 0 ; func end
+ E5B4  39                rts
+ E5B5            _OptrexGetAddress::
+ E5B5            ; 
+ E5B5            ; unsigned char OptrexGetAddress(void)
+ E5B5            ; {
+ E5B5            ;    return (OPTREX_CMDREG & 0x7f);
+ E5B5            	; vol
+ E5B5  F6B5F0            ldab 0xb5f0
+ E5B8  C47F              andb #127
+ E5BA  4F                clra
+ E5BB            L27:
+ E5BB                    .dbline 0 ; func end
+ E5BB  39                rts
+ E5BC            ;  IX -> 0,x
+ E5BC            ;           dval -> +5,x
+ E5BC            _OptrexWrite::
+ E5BC  37                pshb
+ E5BD  36                psha
+ E5BE  3C                pshx
+ E5BF  3C                pshx
+ E5C0  30                tsx
+ E5C1  EF00              stx 0,x
+ E5C3            ; }
+ E5C3            ; 
+ E5C3            ; void OptrexWrite(char dval)
+ E5C3            ; {
+ E5C3            ;     OptrexBusy();                          // wait for busy to clear
+ E5C3  BDE637            jsr _OptrexBusy
+ E5C6            ;     OPTREX_DATAREG = dval;                 // ouptut data
+ E5C6  E605              ldab 5,x
+ E5C8  F7B5F1            stab 0xb5f1
+ E5CB            ; }
+ E5CB            L28:
+ E5CB  08                inx
+ E5CC  08                inx
+ E5CD  35                txs
+ E5CE  38                pulx
+ E5CF  1838              puly
+ E5D1                    .dbline 0 ; func end
+ E5D1  39                rts
+ E5D2            ;  IX -> 0,x
+ E5D2            ;          ?temp -> +3,x
+ E5D2            ;           addr -> +5,x
+ E5D2            ;              y -> +13,x
+ E5D2            ;              x -> +9,x
+ E5D2            _OptrexGotoXY::
+ E5D2  BDED04            jsr __enterb
+ E5D5  46                .byte 0x46
+ E5D6            ; 
+ E5D6            ; 
+ E5D6            ; void OptrexGotoXY(char x, char y)
+ E5D6            ; {
+ E5D6            ;     char addr;
+ E5D6            ; 
+ E5D6            ;     switch (y)
+ E5D6  E60D              ldab 13,x
+ E5D8  4F                clra
+ E5D9  ED03              std 3,x
+ E5DB  271A              beq L33
+ E5DD  EC03              ldd 3,x
+ E5DF  1A830001          cpd #1
+ E5E3  2716              beq L34
+ E5E5  EC03              ldd 3,x
+ E5E7  1A830002          cpd #2
+ E5EB  2714              beq L35
+ E5ED  EC03              ldd 3,x
+ E5EF  1A830003          cpd #3
+ E5F3  2712              beq L36
+ E5F5  2014              bra L30
+ E5F7            X0:
+ E5F7            ;     {
+ E5F7            L33:
+ E5F7            ;         case 0 : addr = 0x00; break;
+ E5F7  6F05              clr 5,x
+ E5F9  2010              bra L31
+ E5FB            L34:
+ E5FB            ;         case 1 : addr = 0x40; break;
+ E5FB  C640              ldab #64
+ E5FD  E705              stab 5,x
+ E5FF  200A              bra L31
+ E601            L35:
+ E601            ;         case 2 : addr = 0x14; break;
+ E601  C614              ldab #20
+ E603  E705              stab 5,x
+ E605  2004              bra L31
+ E607            L36:
+ E607            ;         case 3 : addr = 0x54; break;
+ E607  C654              ldab #84
+ E609  E705              stab 5,x
+ E60B            L30:
+ E60B            L31:
+ E60B            ;     }
+ E60B            ; 
+ E60B            ;     addr += x;
+ E60B  E605              ldab 5,x
+ E60D  EB09              addb 9,x
+ E60F  E705              stab 5,x
+ E611            ; 
+ E611            ;     OptrexSetAddress(addr);
+ E611  E605              ldab 5,x
+ E613  4F                clra
+ E614  BDE59F            jsr _OptrexSetAddress
+ E617            ; }
+ E617            L29:
+ E617  8F                xgdx
+ E618  C30006            addd #6
+ E61B  8F                xgdx
+ E61C  35                txs
+ E61D  38                pulx
+ E61E  1838              puly
+ E620                    .dbline 0 ; func end
+ E620  39                rts
+ E621            ;  IX -> 0,x
+ E621            ;           cval -> +5,x
+ E621            _OptrexCommand::
+ E621  37                pshb
+ E622  36                psha
+ E623  3C                pshx
+ E624  3C                pshx
+ E625  30                tsx
+ E626  EF00              stx 0,x
+ E628            ; 
+ E628            ; 
+ E628            ; void OptrexCommand(unsigned char cval)
+ E628            ; {
+ E628            ;     OptrexBusy();                          // wait for busy to clear
+ E628  BDE637            jsr _OptrexBusy
+ E62B            ;     OPTREX_CMDREG = cval;                  // output command
+ E62B  E605              ldab 5,x
+ E62D  F7B5F0            stab 0xb5f0
+ E630            ; }
+ E630            L37:
+ E630  08                inx
+ E631  08                inx
+ E632  35                txs
+ E633  38                pulx
+ E634  1838              puly
+ E636                    .dbline 0 ; func end
+ E636  39                rts
+ E637            _OptrexBusy::
+ E637            ; 
+ E637            ; 
+ E637            ; //
+ E637            ; //               ***************************************
+ E637            ; //               *   local functions after this point  *
+ E637            ; //               ***************************************
+ E637            ; //
+ E637            ; 
+ E637            ; 
+ E637            ; //---------------------------------------------------------------------------
+ E637            ; //  Wait for the LCD busy pin to clear
+ E637            ; //---------------------------------------------------------------------------
+ E637            ; 
+ E637            ; void OptrexBusy(void)
+ E637            ; {
+ E637            L39:
+ E637            L40:
+ E637            ;     while (OPTREX_CMDREG & 0x80);
+ E637  18CEB5F0          ldy #0xb5f0
+ E63B  181F008002        brclr 0,y,#128,X1
+ E640  20F5              bra L39
+ E642            X1:
+ E642            ; }
+ E642            L38:
+ E642                    .dbline 0 ; func end
+ E642  39                rts
+                        .area bss
+ 201C            _g_dispmode::
+ 201C                    .blkb 1
