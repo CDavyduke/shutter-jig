@@ -1,5 +1,5 @@
 [Compiler Options]
-Edit1=C:\icc\include\;C:\Projects\Shutterciser\firmware\Re-creation\include
+Edit1=C:\icc\include\;include\
 Edit2=C:\icc\lib\
 Edit8=
 CheckBox1=0

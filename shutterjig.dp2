@@ -1,2 +1,1 @@
-shutterjig.o: C:/icc/include/hc11.h C:/Projects/Shutterciser/firmware/Re-creation/include/lib_optrex.h C:/Projects/Shutterciser/firmware/Re-creation/include/lib_eeprom.h C:/Projects/Shutterciser/firmware/Re-creation/include/lib_adc.h\
- C:/Projects/Shutterciser/firmware/Re-creation/include/lib_timer.h
+shutterjig.o: C:/icc/include/hc11.h include/lib_optrex.h include/lib_timer.h

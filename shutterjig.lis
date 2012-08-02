@@ -3,10 +3,13 @@
                 ;  lreg1 -> -4,x
                 ;  lreg2 -> -8,x
                 ;  IX -> 0,x
-                ;         tmpstr -> +3,x
+                ;         status -> +3,x
+                ;      strStatus -> +4,x
+                ;        buttons -> +16,x
+                ;         tmpstr -> +17,x
  0000           _main::
  0000 BD0000            jsr __enterb
- 0003 98                .byte 0x98
+ 0003 A6                .byte 0xa6
  0004           ; //=======================================================================
  0004           ; //
  0004           ; //
@@ -37,26 +40,23 @@
  0004           ; 
  0004           ; #include <hc11.h>
  0004           ; #include <lib_optrex.h>
- 0004           ; #include <lib_eeprom.h>
- 0004           ; #include <lib_adc.h>
  0004           ; #include <lib_timer.h>
  0004           ; 
- 0004           ; // definitions
+ 0004           ; // Definitions
  0004           ; #define BUTTON_O 0x01
  0004           ; #define BUTTON_C 0x02
  0004           ; #define ON_TIME 100
  0004           ; #define OFF_TIME 900
  0004           ; 
- 0004           ; // external proto's
- 0004           ; extern void _start();                 // entry point in crt11.s
+ 0004           ; // External function prototypes
+ 0004           ; extern void _start( );                        // entry point in crt11.s
  0004           ; 
- 0004           ; // local proto's
- 0004           ; void sc_init(void);
- 0004           ; void sc_acquire_buttons(void);
- 0004           ; unsigned char sc_get_buttons(void);
- 0004           ; void sc_set_driver(unsigned char val);
- 0004           ; unsigned char sc_get_driver(void);
- 0004           ; void TimerSleep(long msec);
+ 0004           ; // Local function prototypes
+ 0004           ; void sc_init( void );
+ 0004           ; unsigned char sc_get_buttons( void );
+ 0004           ; void sc_set_driver( unsigned char val );
+ 0004           ; unsigned char sc_get_driver( void );
+ 0004           ; void TimerSleep( long msec );
  0004           ; 
  0004           ; unsigned long g_scycles;
  0004           ; unsigned long gTimerSeconds;
@@ -70,397 +70,570 @@
  0004           ; long gTimerTicks;
  0004           ; unsigned char g_flipside;
  0004           ; 
- 0004           ; unsigned char new_buttons, old_buttons;
+ 0004           ; unsigned int shutter_opened;
+ 0004           ; unsigned int shutter_closed;
+ 0004           ; unsigned int shutter_open;
+ 0004           ; unsigned int shutter_close;
+ 0004           ; unsigned int open_shutter;
+ 0004           ; unsigned int close_shutter;
  0004           ; 
- 0004           ; 
- 0004           ; void main(void)
+ 0004           ; void main( void )
  0004           ; {
- 0004           ;       char tmpstr[21];
+ 0004           ;   char tmpstr[21];
+ 0004           ;       char strStatus[12];
+ 0004           ;       unsigned char status;
+ 0004           ;   unsigned char buttons;
  0004           ; 
- 0004           ;     //-------------------------
- 0004           ;     // initialize ram variable
- 0004           ;     //-------------------------
  0004           ; 
- 0004           ;     gFlipTarget = 0;                    // important to set this before ints!
- 0004 18CE0417          ldy #L4
+ 0004           ;   //-------------------------
+ 0004           ;   // initialize ram variable
+ 0004           ;   //-------------------------
+ 0004           ; 
+ 0004           ;   gFlipTarget = 0;                    // important to set this before ints!
+ 0004 18CE05E6          ldy #L4
  0008 BD0000            jsr __ly2reg
- 000B 18CE000B          ldy #_gFlipTarget
+ 000B 18CE0015          ldy #_gFlipTarget
  000F BD0000            jsr __lreg2y
- 0012           ;     g_flipside = 0;
- 0012 7F0002            clr _g_flipside
- 0015           ;     new_buttons = old_buttons = 0;
- 0015 7F0000            clr _old_buttons
- 0018 7F0001            clr _new_buttons
- 001B           ; 
- 001B           ;     sc_init();
- 001B BD0168            jsr _sc_init
- 001E           ; 
- 001E           ;     g_scycles = 0;
- 001E 18CE0413          ldy #L5
- 0022 BD0000            jsr __ly2reg
- 0025 18CE0017          ldy #_g_scycles
- 0029 BD0000            jsr __lreg2y
- 002C           ;     g_etime_hours = 0;
- 002C CC0000            ldd #0
- 002F FD0011            std _g_etime_hours
- 0032           ;     g_etime_mins = 0;
- 0032 7F0010            clr _g_etime_mins
- 0035           ;     g_etime_secs = 0;
- 0035 7F000F            clr _g_etime_secs
- 0038           ; 
- 0038           ;     sc_acquire_buttons();
- 0038 BD0175            jsr _sc_acquire_buttons
- 003B           ; 
- 003B           ;     OptrexClear();
- 003B BD0000            jsr _OptrexClear
- 003E           ;     OptrexGotoXY(2,1);
- 003E CC0001            ldd #1
- 0041 37                pshb
- 0042 36                psha
- 0043 CC0002            ldd #2
- 0046 BD0000            jsr _OptrexGotoXY
- 0049 1838              puly
- 004B           ;     OptrexWriteString("TH2 Shutter Jig");
- 004B CC0403            ldd #L6
- 004E BD0000            jsr _OptrexWriteString
- 0051           ;     OptrexGotoXY(3,2);
- 0051 CC0002            ldd #2
- 0054 37                pshb
- 0055 36                psha
- 0056 CC0003            ldd #3
- 0059 BD0000            jsr _OptrexGotoXY
- 005C 1838              puly
- 005E           ;     OptrexWriteString("Version 1.00");
- 005E CC03F6            ldd #L7
- 0061 BD0000            jsr _OptrexWriteString
- 0064           ;     TimerSleep(3000);
- 0064 18CE03F2          ldy #L8
- 0068 BD0000            jsr __ly2reg
- 006B 183C              pshy
- 006D 183C              pshy
- 006F 1830              tsy
- 0071 BD0000            jsr __lreg2y
- 0074 BD0342            jsr _TimerSleep
- 0077 1838              puly
+ 0012           ;   g_flipside = 0;
+ 0012 7F000C            clr _g_flipside
+ 0015           ;   buttons = 0;
+ 0015 6F10              clr 16,x
+ 0017           ; 
+ 0017           ;   sc_init( );
+ 0017 BD0291            jsr _sc_init
+ 001A           ; 
+ 001A           ;   g_scycles = 0;
+ 001A 18CE05E2          ldy #L5
+ 001E BD0000            jsr __ly2reg
+ 0021 18CE0021          ldy #_g_scycles
+ 0025 BD0000            jsr __lreg2y
+ 0028           ;   g_etime_hours = 0;
+ 0028 CC0000            ldd #0
+ 002B FD001B            std _g_etime_hours
+ 002E           ;   g_etime_mins = 0;
+ 002E 7F001A            clr _g_etime_mins
+ 0031           ;   g_etime_secs = 0;
+ 0031 7F0019            clr _g_etime_secs
+ 0034           ;       
+ 0034           ;       shutter_opened = 0;
+ 0034 CC0000            ldd #0
+ 0037 FD000A            std _shutter_opened
+ 003A           ;       shutter_closed = 0;
+ 003A CC0000            ldd #0
+ 003D FD0008            std _shutter_closed
+ 0040           ;       shutter_open = 0;
+ 0040 CC0000            ldd #0
+ 0043 FD0006            std _shutter_open
+ 0046           ;       shutter_close = 0;
+ 0046 CC0000            ldd #0
+ 0049 FD0004            std _shutter_close
+ 004C           ;       open_shutter = 0;
+ 004C CC0000            ldd #0
+ 004F FD0002            std _open_shutter
+ 0052           ;       close_shutter = 0;
+ 0052 CC0000            ldd #0
+ 0055 FD0000            std _close_shutter
+ 0058           ; 
+ 0058           ;   // Display an opening "banner" on the LCD screen.
+ 0058           ;   OptrexClear( );
+ 0058 BD0000            jsr _OptrexClear
+ 005B           ;   OptrexGotoXY( 2,1 );
+ 005B CC0001            ldd #1
+ 005E 37                pshb
+ 005F 36                psha
+ 0060 CC0002            ldd #2
+ 0063 BD0000            jsr _OptrexGotoXY
+ 0066 1838              puly
+ 0068           ;   OptrexWriteString( "TH2 Shutter Jig" );
+ 0068 CC05D2            ldd #L6
+ 006B BD0000            jsr _OptrexWriteString
+ 006E           ;   OptrexGotoXY( 3,2 );
+ 006E CC0002            ldd #2
+ 0071 37                pshb
+ 0072 36                psha
+ 0073 CC0003            ldd #3
+ 0076 BD0000            jsr _OptrexGotoXY
  0079 1838              puly
- 007B           ;     OptrexClear();
- 007B BD0000            jsr _OptrexClear
- 007E 7E015D            jmp L10
- 0081           L9:
- 0081           ; 
- 0081           ;     while(1)
- 0081           ; 	{
- 0081           ;         //----------------
- 0081           ;         // update display
- 0081           ;         //----------------
- 0081           ;         if (gTimerTicks % 50)
- 0081 18CE0003          ldy #_gTimerTicks
+ 007B           ;   OptrexWriteString( "Version 1.00" );
+ 007B CC05C5            ldd #L7
+ 007E BD0000            jsr _OptrexWriteString
+ 0081           ;   TimerSleep( 3000 );
+ 0081 18CE05C1          ldy #L8
  0085 BD0000            jsr __ly2reg
- 0088 18CE03EE          ldy #L14
- 008C BD0000            jsr __ly2reg2
- 008F BD0000            jsr __lmod
- 0092 18CE0417          ldy #L4
- 0096 BD0000            jsr __ly2reg2
- 0099 BD0000            jsr __lcmp
- 009C 2603              bne X1
- 009E 7E015A            jmp L12
- 00A1           X1:
- 00A1           ;         {
- 00A1           ;             OptrexGotoXY(0,0);
- 00A1 CC0000            ldd #0
- 00A4 37                pshb
- 00A5 36                psha
- 00A6 CC0000            ldd #0
- 00A9 BD0000            jsr _OptrexGotoXY
- 00AC 1838              puly
- 00AE           ;             OptrexWriteString("----- Cycling ------");
- 00AE CC03D9            ldd #L15
- 00B1 BD0000            jsr _OptrexWriteString
- 00B4           ; 
- 00B4           ;             sprintf(tmpstr, "on=%d ms off=%d ms", ON_TIME, OFF_TIME);
- 00B4 CC0384            ldd #900
- 00B7 37                pshb
- 00B8 36                psha
- 00B9 CC0064            ldd #100
+ 0088 183C              pshy
+ 008A 183C              pshy
+ 008C 1830              tsy
+ 008E BD0000            jsr __lreg2y
+ 0091 BD04E2            jsr _TimerSleep
+ 0094 1838              puly
+ 0096 1838              puly
+ 0098           ;   OptrexClear( );
+ 0098 BD0000            jsr _OptrexClear
+ 009B 7E0286            jmp L10
+ 009E           L9:
+ 009E           ; 
+ 009E           ;   while( 1 )
+ 009E           ; 	{
+ 009E           ; 
+ 009E           ;     if( shutter_opened )
+ 009E FC000A            ldd _shutter_opened
+ 00A1 2711              beq L12
+ 00A3           ;               {
+ 00A3           ;                 sprintf(strStatus, "opened" );
+ 00A3 CC05BA            ldd #L14
+ 00A6 37                pshb
+ 00A7 36                psha
+ 00A8 EC00              ldd 0,x
+ 00AA C30004            addd #4
+ 00AD BD0000            jsr _sprintf
+ 00B0 1838              puly
+ 00B2           ;               }
+ 00B2 2025              bra L13
+ 00B4           L12:
+ 00B4           ; 		else if( shutter_closed )
+ 00B4 FC0008            ldd _shutter_closed
+ 00B7 2711              beq L15
+ 00B9           ;               {
+ 00B9           ;                 sprintf(strStatus, "closed" );
+ 00B9 CC05B3            ldd #L17
  00BC 37                pshb
  00BD 36                psha
- 00BE CC03C6            ldd #L16
- 00C1 37                pshb
- 00C2 36                psha
- 00C3 EC00              ldd 0,x
- 00C5 C30003            addd #3
- 00C8 BD0000            jsr _sprintf
- 00CB BD0000            jsr __movspb
- 00CE 06                .byte 6
- 00CF           ;             OptrexGotoXY(0,1);
- 00CF CC0001            ldd #1
- 00D2 37                pshb
- 00D3 36                psha
- 00D4 CC0000            ldd #0
- 00D7 BD0000            jsr _OptrexGotoXY
- 00DA 1838              puly
- 00DC           ;             OptrexWriteString(tmpstr);
- 00DC EC00              ldd 0,x
- 00DE C30003            addd #3
- 00E1 BD0000            jsr _OptrexWriteString
- 00E4           ;             OptrexClearEOL();
- 00E4 BD0000            jsr _OptrexClearEOL
- 00E7           ; 
- 00E7           ;             sprintf(tmpstr, "et=%02d:%02d:%02d", g_etime_hours, g_etime_mins, g_etime_secs);
- 00E7 F6000F            ldab _g_etime_secs
- 00EA 4F                clra
- 00EB 37                pshb
- 00EC 36                psha
- 00ED F60010            ldab _g_etime_mins
- 00F0 4F                clra
- 00F1 37                pshb
- 00F2 36                psha
- 00F3 FC0011            ldd _g_etime_hours
- 00F6 37                pshb
- 00F7 36                psha
- 00F8 CC03B4            ldd #L17
- 00FB 37                pshb
- 00FC 36                psha
- 00FD EC00              ldd 0,x
- 00FF C30003            addd #3
- 0102 BD0000            jsr _sprintf
- 0105 BD0000            jsr __movspb
- 0108 08                .byte 8
- 0109           ;             OptrexGotoXY(0,2);
- 0109 CC0002            ldd #2
- 010C 37                pshb
- 010D 36                psha
- 010E CC0000            ldd #0
- 0111 BD0000            jsr _OptrexGotoXY
- 0114 1838              puly
- 0116           ;             OptrexWriteString(tmpstr);
- 0116 EC00              ldd 0,x
- 0118 C30003            addd #3
- 011B BD0000            jsr _OptrexWriteString
- 011E           ; 
- 011E           ;             sprintf(tmpstr, "odometer=%07ld", g_scycles >> 1);
- 011E 18CE0017          ldy #_g_scycles
- 0122 BD0000            jsr __ly2reg
- 0125 CC0001            ldd #1
- 0128 BD0000            jsr __luirsh
- 012B 183C              pshy
- 012D 183C              pshy
- 012F 1830              tsy
- 0131 BD0000            jsr __lreg2y
- 0134 CC03A5            ldd #L18
- 0137 37                pshb
- 0138 36                psha
- 0139 EC00              ldd 0,x
- 013B C30003            addd #3
- 013E BD0000            jsr _sprintf
- 0141 BD0000            jsr __movspb
- 0144 06                .byte 6
- 0145           ;             OptrexGotoXY(0,3);
- 0145 CC0003            ldd #3
- 0148 37                pshb
- 0149 36                psha
- 014A CC0000            ldd #0
- 014D BD0000            jsr _OptrexGotoXY
- 0150 1838              puly
- 0152           ;             OptrexWriteString(tmpstr);
- 0152 EC00              ldd 0,x
- 0154 C30003            addd #3
- 0157 BD0000            jsr _OptrexWriteString
- 015A           ;         }
- 015A           L12:
- 015A BD0175            jsr _sc_acquire_buttons
- 015D           L10:
- 015D 7E0081            jmp L9
- 0160           X0:
- 0160           ; 
- 0160           ;         sc_acquire_buttons();
- 0160           ; 	}
- 0160           ; }
- 0160           L3:
- 0160 8F                xgdx
- 0161 C30018            addd #24
- 0164 8F                xgdx
- 0165 35                txs
- 0166 38                pulx
- 0167                   .dbline 0 ; func end
- 0167 39                rts
- 0168           _sc_init::
- 0168           ; 
- 0168           ; 
- 0168           ; void sc_init(void)
- 0168           ; {
- 0168           ;     sc_set_driver(0);
- 0168 CC0000            ldd #0
- 016B BD0197            jsr _sc_set_driver
- 016E           ; 
- 016E           ;     OptrexInit();
- 016E BD0000            jsr _OptrexInit
- 0171           ;     TimerInit();
- 0171 BD01D9            jsr _TimerInit
- 0174           ; }
- 0174           L19:
- 0174                   .dbline 0 ; func end
- 0174 39                rts
- 0175           _sc_acquire_buttons::
- 0175           ; 
- 0175           ; 
- 0175           ; void sc_acquire_buttons(void)
- 0175           ; {
- 0175           ;     //--------------------
- 0175           ;     // button acquisition
- 0175           ;     //--------------------
- 0175           ; 
- 0175           ;     old_buttons = new_buttons;
- 0175 F60001            ldab _new_buttons
- 0178 F70000            stab _old_buttons
- 017B           ;     new_buttons = sc_get_buttons();
- 017B BD0182            jsr _sc_get_buttons
- 017E F70001            stab _new_buttons
- 0181           ; }
- 0181           L20:
- 0181                   .dbline 0 ; func end
- 0181 39                rts
- 0182           ;  IX -> 0,x
- 0182           ;         retval -> +3,x
- 0182           _sc_get_buttons::
- 0182 BD0000            jsr __enterb
- 0185 04                .byte 0x4
- 0186           ; 
- 0186           ; 
- 0186           ; unsigned char sc_get_buttons(void)
- 0186           ; {
- 0186           ;     unsigned char retval;
- 0186           ; 
- 0186           ;     retval = PORTA & 0x3;
- 0186                   ; vol
- 0186 F61000            ldab 0x1000
- 0189 C403              andb #3
- 018B E703              stab 3,x
- 018D           ; 
- 018D           ;     return (retval);
- 018D E603              ldab 3,x
- 018F 4F                clra
- 0190           L21:
- 0190 08                inx
- 0191 08                inx
- 0192 08                inx
- 0193 08                inx
- 0194 35                txs
- 0195 38                pulx
- 0196                   .dbline 0 ; func end
- 0196 39                rts
- 0197           ;  IX -> 0,x
- 0197           ;  rMEM -> 2,x
- 0197           ;           stat -> +5,x
- 0197           ;            val -> +9,x
- 0197           _sc_set_driver::
- 0197 BD0000            jsr __enterb
- 019A 46                .byte 0x46
- 019B           ; }
- 019B           ; 
- 019B           ; void sc_set_driver(unsigned char val)
- 019B           ; {
- 019B           ;     unsigned char stat;
- 019B           ; 
- 019B           ;     val &= 0x03;
- 019B 1D09FC            bclr 9,x,#0xfc
- 019E           ;     stat = sc_get_driver();
- 019E BD01CB            jsr _sc_get_driver
- 01A1 E705              stab 5,x
- 01A3           ; 
- 01A3           ;     if (stat != val)
- 01A3 E605              ldab 5,x
- 01A5 E109              cmpb 9,x
- 01A7 2718              beq L23
- 01A9           ;     {
- 01A9           ;         PORTA &= ~0x30;                 // prevent any shoot through
- 01A9 18CE1000          ldy #0x1000
- 01AD 181D0030          bclr 0,y,#0x30
- 01B1           ;         PORTA |= (val << 4);
- 01B1 E609              ldab 9,x
- 01B3 58                lslb
- 01B4 58                lslb
- 01B5 58                lslb
- 01B6 58                lslb
- 01B7 E702              stab 2,x
- 01B9                   ; vol
- 01B9 F61000            ldab 0x1000
- 01BC EA02              orab 2,x
- 01BE F71000            stab 0x1000
- 01C1           ;     }
- 01C1           L23:
- 01C1           ; 
- 01C1           ; }
- 01C1           L22:
- 01C1 8F                xgdx
- 01C2 C30006            addd #6
- 01C5 8F                xgdx
- 01C6 35                txs
- 01C7 38                pulx
+ 00BE EC00              ldd 0,x
+ 00C0 C30004            addd #4
+ 00C3 BD0000            jsr _sprintf
+ 00C6 1838              puly
+ 00C8           ;               }
+ 00C8 200F              bra L16
+ 00CA           L15:
+ 00CA           ; 		else
+ 00CA           ; 		{
+ 00CA           ;       sprintf(strStatus, "idle" );
+ 00CA CC05AE            ldd #L18
+ 00CD 37                pshb
+ 00CE 36                psha
+ 00CF EC00              ldd 0,x
+ 00D1 C30004            addd #4
+ 00D4 BD0000            jsr _sprintf
+ 00D7 1838              puly
+ 00D9           ;               }
+ 00D9           L16:
+ 00D9           L13:
+ 00D9           ; 		
+ 00D9           ;     //----------------
+ 00D9           ;     // update display
+ 00D9           ;     //----------------
+ 00D9           ;     if( gTimerTicks % 50 )
+ 00D9 18CE000D          ldy #_gTimerTicks
+ 00DD BD0000            jsr __ly2reg
+ 00E0 18CE05AA          ldy #L21
+ 00E4 BD0000            jsr __ly2reg2
+ 00E7 BD0000            jsr __lmod
+ 00EA 18CE05E6          ldy #L4
+ 00EE BD0000            jsr __ly2reg2
+ 00F1 BD0000            jsr __lcmp
+ 00F4 2603              bne X1
+ 00F6 7E01D5            jmp L19
+ 00F9           X1:
+ 00F9           ;     {
+ 00F9           ;       sprintf( tmpstr, "shutter=%s", strStatus );
+ 00F9 EC00              ldd 0,x
+ 00FB C30004            addd #4
+ 00FE 37                pshb
+ 00FF 36                psha
+ 0100 CC059F            ldd #L22
+ 0103 37                pshb
+ 0104 36                psha
+ 0105 EC00              ldd 0,x
+ 0107 C30011            addd #17
+ 010A BD0000            jsr _sprintf
+ 010D 1838              puly
+ 010F 1838              puly
+ 0111           ;       OptrexGotoXY( 0,0 );
+ 0111 CC0000            ldd #0
+ 0114 37                pshb
+ 0115 36                psha
+ 0116 CC0000            ldd #0
+ 0119 BD0000            jsr _OptrexGotoXY
+ 011C 1838              puly
+ 011E           ;       OptrexWriteString( tmpstr );
+ 011E EC00              ldd 0,x
+ 0120 C30011            addd #17
+ 0123 BD0000            jsr _OptrexWriteString
+ 0126           ;       OptrexClearEOL( );
+ 0126 BD0000            jsr _OptrexClearEOL
+ 0129           ; 
+ 0129           ;       sprintf( tmpstr, "on=%d ms off=%d ms", ON_TIME, OFF_TIME );
+ 0129 CC0384            ldd #900
+ 012C 37                pshb
+ 012D 36                psha
+ 012E CC0064            ldd #100
+ 0131 37                pshb
+ 0132 36                psha
+ 0133 CC058C            ldd #L23
+ 0136 37                pshb
+ 0137 36                psha
+ 0138 EC00              ldd 0,x
+ 013A C30011            addd #17
+ 013D BD0000            jsr _sprintf
+ 0140 BD0000            jsr __movspb
+ 0143 06                .byte 6
+ 0144           ;       OptrexGotoXY( 0,1 );
+ 0144 CC0001            ldd #1
+ 0147 37                pshb
+ 0148 36                psha
+ 0149 CC0000            ldd #0
+ 014C BD0000            jsr _OptrexGotoXY
+ 014F 1838              puly
+ 0151           ;       OptrexWriteString( tmpstr );
+ 0151 EC00              ldd 0,x
+ 0153 C30011            addd #17
+ 0156 BD0000            jsr _OptrexWriteString
+ 0159           ;       OptrexClearEOL( );
+ 0159 BD0000            jsr _OptrexClearEOL
+ 015C           ; 
+ 015C           ;       sprintf( tmpstr, "time=%02d:%02d:%02d", g_etime_hours, g_etime_mins, g_etime_secs );
+ 015C F60019            ldab _g_etime_secs
+ 015F 4F                clra
+ 0160 37                pshb
+ 0161 36                psha
+ 0162 F6001A            ldab _g_etime_mins
+ 0165 4F                clra
+ 0166 37                pshb
+ 0167 36                psha
+ 0168 FC001B            ldd _g_etime_hours
+ 016B 37                pshb
+ 016C 36                psha
+ 016D CC0578            ldd #L24
+ 0170 37                pshb
+ 0171 36                psha
+ 0172 EC00              ldd 0,x
+ 0174 C30011            addd #17
+ 0177 BD0000            jsr _sprintf
+ 017A BD0000            jsr __movspb
+ 017D 08                .byte 8
+ 017E           ;       OptrexGotoXY( 0,2 );
+ 017E CC0002            ldd #2
+ 0181 37                pshb
+ 0182 36                psha
+ 0183 CC0000            ldd #0
+ 0186 BD0000            jsr _OptrexGotoXY
+ 0189 1838              puly
+ 018B           ;       OptrexWriteString( tmpstr );
+ 018B EC00              ldd 0,x
+ 018D C30011            addd #17
+ 0190 BD0000            jsr _OptrexWriteString
+ 0193           ;       OptrexClearEOL( );
+ 0193 BD0000            jsr _OptrexClearEOL
+ 0196           ; 
+ 0196           ;       sprintf( tmpstr, "odometer=%07ld", g_scycles >> 1 );
+ 0196 18CE0021          ldy #_g_scycles
+ 019A BD0000            jsr __ly2reg
+ 019D CC0001            ldd #1
+ 01A0 BD0000            jsr __luirsh
+ 01A3 183C              pshy
+ 01A5 183C              pshy
+ 01A7 1830              tsy
+ 01A9 BD0000            jsr __lreg2y
+ 01AC CC0569            ldd #L25
+ 01AF 37                pshb
+ 01B0 36                psha
+ 01B1 EC00              ldd 0,x
+ 01B3 C30011            addd #17
+ 01B6 BD0000            jsr _sprintf
+ 01B9 BD0000            jsr __movspb
+ 01BC 06                .byte 6
+ 01BD           ;       OptrexGotoXY( 0,3 );
+ 01BD CC0003            ldd #3
+ 01C0 37                pshb
+ 01C1 36                psha
+ 01C2 CC0000            ldd #0
+ 01C5 BD0000            jsr _OptrexGotoXY
  01C8 1838              puly
- 01CA                   .dbline 0 ; func end
- 01CA 39                rts
- 01CB           _sc_get_driver::
- 01CB           ; 
- 01CB           ; unsigned char sc_get_driver(void)
- 01CB           ; {
- 01CB           ;     return ((PORTA >> 4) & 0x03);
- 01CB           	; vol
- 01CB F61000            ldab 0x1000
- 01CE 4F                clra
- 01CF 04                lsrd
- 01D0 04                lsrd
- 01D1 04                lsrd
- 01D2 04                lsrd
- 01D3 8400              anda #0
- 01D5 C403              andb #3
- 01D7 4F                clra
- 01D8           L25:
- 01D8                   .dbline 0 ; func end
- 01D8 39                rts
- 01D9           ;  lreg1 -> -4,x
- 01D9           ;  lreg2 -> -8,x
- 01D9           ;  IX -> 0,x
- 01D9           _TimerInit::
- 01D9 BD0000            jsr __enterb
- 01DC 82                .byte 0x82
- 01DD           ; }
- 01DD           ; 
- 01DD           ; 
- 01DD           ; #pragma interrupt_handler TimerTOC2Isr
- 01DD           ; 
- 01DD           ; void TimerInit(void)
- 01DD           ; {
- 01DD           ;     TMSK1 = OC2F;                       // enable interrupts on OC2
- 01DD C640              ldab #64
- 01DF F71022            stab 0x1022
- 01E2           ;     TCTL1 = 0x00;                       // setup OC2 for n.c.
- 01E2 7F1020            clr 0x1020
- 01E5           ; 
- 01E5           ;     gTimerTicks = 0;
- 01E5 18CE0417          ldy #L4
- 01E9 BD0000            jsr __ly2reg
- 01EC 18CE0003          ldy #_gTimerTicks
- 01F0 BD0000            jsr __lreg2y
- 01F3           ;     gTimerSeconds = 0;
- 01F3 18CE0413          ldy #L5
- 01F7 BD0000            jsr __ly2reg
- 01FA 18CE0013          ldy #_gTimerSeconds
- 01FE BD0000            jsr __lreg2y
- 0201           ; 
- 0201           ;     INTR_ON();
- 0201 0E                                cli
- 0202           
- 0202           ; }
- 0202           L26:
- 0202 08                inx
- 0203 08                inx
- 0204 35                txs
- 0205 38                pulx
- 0206                   .dbline 0 ; func end
- 0206 39                rts
+ 01CA           ;       OptrexWriteString( tmpstr );
+ 01CA EC00              ldd 0,x
+ 01CC C30011            addd #17
+ 01CF BD0000            jsr _OptrexWriteString
+ 01D2           ;       OptrexClearEOL( );
+ 01D2 BD0000            jsr _OptrexClearEOL
+ 01D5           ;     }
+ 01D5           L19:
+ 01D5           ; 
+ 01D5           ;     buttons = sc_get_buttons( );
+ 01D5 BD029E            jsr _sc_get_buttons
+ 01D8 E710              stab 16,x
+ 01DA           ;               
+ 01DA           ;               // If the "open" button has been pressed, we want the shutter to open.
+ 01DA           ;               if( buttons & BUTTON_O )
+ 01DA 1F100156          brclr 16,x,#1,L26
+ 01DE           ;               {
+ 01DE           ;                 shutter_open = 1;
+ 01DE CC0001            ldd #1
+ 01E1 FD0006            std _shutter_open
+ 01E4           ;                       
+ 01E4           ;       // If the user is requesting to open the shutter and it's already open, send a message.
+ 01E4           ;                       if( shutter_open && shutter_opened )
+ 01E4 FC0006            ldd _shutter_open
+ 01E7 2603              bne X2
+ 01E9 7E0286            jmp L27
+ 01EC           X2:
+ 01EC FC000A            ldd _shutter_opened
+ 01EF 2603              bne X3
+ 01F1 7E0286            jmp L27
+ 01F4           X3:
+ 01F4           ; 			{
+ 01F4           ;         sprintf( tmpstr, "Already opened!" );
+ 01F4 CC0559            ldd #L30
+ 01F7 37                pshb
+ 01F8 36                psha
+ 01F9 EC00              ldd 0,x
+ 01FB C30011            addd #17
+ 01FE BD0000            jsr _sprintf
+ 0201 1838              puly
+ 0203           ;         OptrexGotoXY( 0,0 );
+ 0203 CC0000            ldd #0
+ 0206 37                pshb
+ 0207 36                psha
+ 0208 CC0000            ldd #0
+ 020B BD0000            jsr _OptrexGotoXY
+ 020E 1838              puly
+ 0210           ;         OptrexWriteString( tmpstr );
+ 0210 EC00              ldd 0,x
+ 0212 C30011            addd #17
+ 0215 BD0000            jsr _OptrexWriteString
+ 0218           ;         OptrexClearEOL( );
+ 0218 BD0000            jsr _OptrexClearEOL
+ 021B           ;         TimerSleep( 200 );
+ 021B 18CE0555          ldy #L31
+ 021F BD0000            jsr __ly2reg
+ 0222 183C              pshy
+ 0224 183C              pshy
+ 0226 1830              tsy
+ 0228 BD0000            jsr __lreg2y
+ 022B BD04E2            jsr _TimerSleep
+ 022E 1838              puly
+ 0230 1838              puly
+ 0232           ;                       }
+ 0232           ;               }
+ 0232 2052              bra L27
+ 0234           L26:
+ 0234           ; 		// If the "close" button has been pressed, we want the shutter to close.
+ 0234           ; 		else if( buttons & BUTTON_C )
+ 0234 1F10024E          brclr 16,x,#2,L32
+ 0238           ;               {
+ 0238           ;                 shutter_close = 1;
+ 0238 CC0001            ldd #1
+ 023B FD0004            std _shutter_close
+ 023E           ; 
+ 023E           ;       // If the user is requesting to close the shutter and it's already closed, send a message.                      
+ 023E           ;                       if( shutter_close && shutter_closed )
+ 023E FC0004            ldd _shutter_close
+ 0241 2743              beq L34
+ 0243 FC0008            ldd _shutter_closed
+ 0246 273E              beq L34
+ 0248           ;                       {
+ 0248           ;         sprintf( tmpstr, "Already closed!" );
+ 0248 CC0545            ldd #L36
+ 024B 37                pshb
+ 024C 36                psha
+ 024D EC00              ldd 0,x
+ 024F C30011            addd #17
+ 0252 BD0000            jsr _sprintf
+ 0255 1838              puly
+ 0257           ;         OptrexGotoXY( 0,0 );
+ 0257 CC0000            ldd #0
+ 025A 37                pshb
+ 025B 36                psha
+ 025C CC0000            ldd #0
+ 025F BD0000            jsr _OptrexGotoXY
+ 0262 1838              puly
+ 0264           ;         OptrexWriteString( tmpstr );
+ 0264 EC00              ldd 0,x
+ 0266 C30011            addd #17
+ 0269 BD0000            jsr _OptrexWriteString
+ 026C           ;         OptrexClearEOL( );
+ 026C BD0000            jsr _OptrexClearEOL
+ 026F           ;         TimerSleep( 200 );
+ 026F 18CE0555          ldy #L31
+ 0273 BD0000            jsr __ly2reg
+ 0276 183C              pshy
+ 0278 183C              pshy
+ 027A 1830              tsy
+ 027C BD0000            jsr __lreg2y
+ 027F BD04E2            jsr _TimerSleep
+ 0282 1838              puly
+ 0284 1838              puly
+ 0286           ;                       }
+ 0286           L34:
+ 0286           ; 		}
+ 0286           L32:
+ 0286           L27:
+ 0286           L10:
+ 0286 7E009E            jmp L9
+ 0289           X0:
+ 0289           ; 	}
+ 0289           ; }
+ 0289           L3:
+ 0289 8F                xgdx
+ 028A C30026            addd #38
+ 028D 8F                xgdx
+ 028E 35                txs
+ 028F 38                pulx
+ 0290                   .dbline 0 ; func end
+ 0290 39                rts
+ 0291           _sc_init::
+ 0291           ; 
+ 0291           ; void sc_init( void )
+ 0291           ; {
+ 0291           ;   sc_set_driver( 0 );
+ 0291 CC0000            ldd #0
+ 0294 BD02B3            jsr _sc_set_driver
+ 0297           ; 
+ 0297           ;   OptrexInit( );
+ 0297 BD0000            jsr _OptrexInit
+ 029A           ;   TimerInit( );
+ 029A BD02F5            jsr _TimerInit
+ 029D           ; }
+ 029D           L37:
+ 029D                   .dbline 0 ; func end
+ 029D 39                rts
+ 029E           ;  IX -> 0,x
+ 029E           ;         retval -> +3,x
+ 029E           _sc_get_buttons::
+ 029E BD0000            jsr __enterb
+ 02A1 04                .byte 0x4
+ 02A2           ; 
+ 02A2           ; unsigned char sc_get_buttons( void )
+ 02A2           ; {
+ 02A2           ;   unsigned char retval;
+ 02A2           ; 
+ 02A2           ;   retval = PORTA & 0x3;
+ 02A2                   ; vol
+ 02A2 F61000            ldab 0x1000
+ 02A5 C403              andb #3
+ 02A7 E703              stab 3,x
+ 02A9           ; 
+ 02A9           ;   return( retval );
+ 02A9 E603              ldab 3,x
+ 02AB 4F                clra
+ 02AC           L38:
+ 02AC 08                inx
+ 02AD 08                inx
+ 02AE 08                inx
+ 02AF 08                inx
+ 02B0 35                txs
+ 02B1 38                pulx
+ 02B2                   .dbline 0 ; func end
+ 02B2 39                rts
+ 02B3           ;  IX -> 0,x
+ 02B3           ;  rMEM -> 2,x
+ 02B3           ;           stat -> +5,x
+ 02B3           ;            val -> +9,x
+ 02B3           _sc_set_driver::
+ 02B3 BD0000            jsr __enterb
+ 02B6 46                .byte 0x46
+ 02B7           ; }
+ 02B7           ; 
+ 02B7           ; void sc_set_driver( unsigned char val )
+ 02B7           ; {
+ 02B7           ;   unsigned char stat;
+ 02B7           ; 
+ 02B7           ;   val &= 0x03;
+ 02B7 1D09FC            bclr 9,x,#0xfc
+ 02BA           ;   stat = sc_get_driver( );
+ 02BA BD02E7            jsr _sc_get_driver
+ 02BD E705              stab 5,x
+ 02BF           ; 
+ 02BF           ;   if( stat != val )
+ 02BF E605              ldab 5,x
+ 02C1 E109              cmpb 9,x
+ 02C3 2718              beq L40
+ 02C5           ;   {
+ 02C5           ;     PORTA &= ~0x30;                 // prevent any shoot through
+ 02C5 18CE1000          ldy #0x1000
+ 02C9 181D0030          bclr 0,y,#0x30
+ 02CD           ;     PORTA |= ( val << 4 );
+ 02CD E609              ldab 9,x
+ 02CF 58                lslb
+ 02D0 58                lslb
+ 02D1 58                lslb
+ 02D2 58                lslb
+ 02D3 E702              stab 2,x
+ 02D5                   ; vol
+ 02D5 F61000            ldab 0x1000
+ 02D8 EA02              orab 2,x
+ 02DA F71000            stab 0x1000
+ 02DD           ;   }
+ 02DD           L40:
+ 02DD           ; }
+ 02DD           L39:
+ 02DD 8F                xgdx
+ 02DE C30006            addd #6
+ 02E1 8F                xgdx
+ 02E2 35                txs
+ 02E3 38                pulx
+ 02E4 1838              puly
+ 02E6                   .dbline 0 ; func end
+ 02E6 39                rts
+ 02E7           _sc_get_driver::
+ 02E7           ; 
+ 02E7           ; unsigned char sc_get_driver( void )
+ 02E7           ; {
+ 02E7           ;   return( ( PORTA >> 4 ) & 0x03 );
+ 02E7           	; vol
+ 02E7 F61000            ldab 0x1000
+ 02EA 4F                clra
+ 02EB 04                lsrd
+ 02EC 04                lsrd
+ 02ED 04                lsrd
+ 02EE 04                lsrd
+ 02EF 8400              anda #0
+ 02F1 C403              andb #3
+ 02F3 4F                clra
+ 02F4           L42:
+ 02F4                   .dbline 0 ; func end
+ 02F4 39                rts
+ 02F5           ;  lreg1 -> -4,x
+ 02F5           ;  lreg2 -> -8,x
+ 02F5           ;  IX -> 0,x
+ 02F5           _TimerInit::
+ 02F5 BD0000            jsr __enterb
+ 02F8 82                .byte 0x82
+ 02F9           ; }
+ 02F9           ; 
+ 02F9           ; #pragma interrupt_handler TimerTOC2Isr
+ 02F9           ; 
+ 02F9           ; void TimerInit( void )
+ 02F9           ; {
+ 02F9           ;   TMSK1 = OC2F;                       // enable interrupts on OC2
+ 02F9 C640              ldab #64
+ 02FB F71022            stab 0x1022
+ 02FE           ;   TCTL1 = 0x00;                       // setup OC2 for n.c.
+ 02FE 7F1020            clr 0x1020
+ 0301           ; 
+ 0301           ;   gTimerTicks = 0;
+ 0301 18CE05E6          ldy #L4
+ 0305 BD0000            jsr __ly2reg
+ 0308 18CE000D          ldy #_gTimerTicks
+ 030C BD0000            jsr __lreg2y
+ 030F           ;   gTimerSeconds = 0;
+ 030F 18CE05E2          ldy #L5
+ 0313 BD0000            jsr __ly2reg
+ 0316 18CE001D          ldy #_gTimerSeconds
+ 031A BD0000            jsr __lreg2y
+ 031D           ; 
+ 031D           ;   INTR_ON( );
+ 031D 0E                                cli
+ 031E           
+ 031E           ; }
+ 031E           L43:
+ 031E 08                inx
+ 031F 08                inx
+ 0320 35                txs
+ 0321 38                pulx
+ 0322                   .dbline 0 ; func end
+ 0322 39                rts
                         .area data
- 0000           L28:
+ 0000           L45:
  0000                   .blkb 1
                         .area idata
  0000 00                .byte 0
@@ -469,271 +642,379 @@
                 ;  lreg1 -> -4,x
                 ;  lreg2 -> -8,x
                 ;  IX -> 0,x
-                ;          ?temp -> +2,x
-                ;              i -> +4,x
-                ;    log_current -> +5,x
- 0207           _TimerTOC2Isr::
- 0207 BD0000            jsr __enterb
- 020A 86                .byte 0x86
- 020B           ; 
- 020B           ; void TimerTOC2Isr()
- 020B           ; {
- 020B           ;     static char gTimerTOC2 = 0;
- 020B           ;     unsigned char log_current = 0;
- 020B 6F05              clr 5,x
- 020D           ;     unsigned char i;
- 020D           ; 
- 020D           ;     TFLG1 = OC2F;                       // clear compare flag
- 020D C640              ldab #64
- 020F F71023            stab 0x1023
- 0212           ;     TOC2 = TCNT + 20000;                // setup next interrupt 10 msec later
- 0212                   ; vol
- 0212 FC100E            ldd 0x100e
- 0215 C34E20            addd #20000
- 0218 FD1018            std 0x1018
- 021B           ; 
- 021B           ;     gTimerTicks++;
- 021B 18CE0003          ldy #_gTimerTicks
- 021F BD0000            jsr __ly2reg
- 0222 18CE03A1          ldy #L29
- 0226 BD0000            jsr __ly2reg2
- 0229 BD0000            jsr __ladd
- 022C 18CE0003          ldy #_gTimerTicks
- 0230 BD0000            jsr __lreg2y
- 0233           ;     gTimerTOC2++;                       // advance 10 msec counter
- 0233 F60000            ldab L28
- 0236 CB01              addb #1
- 0238 F70000            stab L28
- 023B           ; 
- 023B           ;     if (gTimerTOC2 >= 100)              // check for 100 & 10 msec
- 023B F60000            ldab L28
- 023E C164              cmpb #100
- 0240 2548              blo L30
- 0242           ;     {
- 0242           ;         gTimerTOC2 = 0;
- 0242 7F0000            clr L28
- 0245           ; 
- 0245           ;         g_etime_secs++;
- 0245 F6000F            ldab _g_etime_secs
- 0248 CB01              addb #1
- 024A F7000F            stab _g_etime_secs
- 024D           ; 
- 024D           ;         if (g_etime_secs > 59)
- 024D F6000F            ldab _g_etime_secs
- 0250 C13B              cmpb #59
- 0252 230B              bls L32
- 0254           ;         {
- 0254           ;             g_etime_secs = 0;
- 0254 7F000F            clr _g_etime_secs
- 0257           ;             g_etime_mins++;
- 0257 F60010            ldab _g_etime_mins
- 025A CB01              addb #1
- 025C F70010            stab _g_etime_mins
- 025F           ;         }
- 025F           L32:
- 025F           ; 
- 025F           ;         if (g_etime_mins > 59)
- 025F F60010            ldab _g_etime_mins
- 0262 C13B              cmpb #59
- 0264 230C              bls L34
- 0266           ;         {
- 0266           ;             g_etime_mins = 0;
- 0266 7F0010            clr _g_etime_mins
- 0269           ;             g_etime_hours++;
- 0269 FC0011            ldd _g_etime_hours
- 026C C30001            addd #1
- 026F FD0011            std _g_etime_hours
- 0272           ;         }
- 0272           L34:
- 0272           ; 
- 0272           ;         gTimerSeconds++;                // advance seconds
- 0272 18CE0013          ldy #_gTimerSeconds
- 0276 BD0000            jsr __ly2reg
- 0279 18CE039D          ldy #L36
- 027D BD0000            jsr __ly2reg2
- 0280 BD0000            jsr __ladd
- 0283 18CE0013          ldy #_gTimerSeconds
- 0287 BD0000            jsr __lreg2y
- 028A           ;     }
- 028A           L30:
- 028A           ; 
- 028A           ;     //------------------------
- 028A           ;     // process solenoid stuff
- 028A           ;     //------------------------
- 028A           ; 
- 028A           ; 
- 028A           ;     if (gTimerTicks > gFlipTarget)  // flip target reached?
- 028A 18CE0003          ldy #_gTimerTicks
- 028E BD0000            jsr __ly2reg
- 0291 18CE000B          ldy #_gFlipTarget
- 0295 BD0000            jsr __ly2reg2
- 0298 BD0000            jsr __lcmp
- 029B 2E03              bgt X3
- 029D 7E031A            jmp L37
- 02A0           X3:
- 02A0           ;     {
- 02A0           ;         // calculate new pulse and flip target
- 02A0           ; 
- 02A0           ;         gPulseTarget = gTimerTicks + (ON_TIME / 10);
- 02A0 18CE0003          ldy #_gTimerTicks
- 02A4 BD0000            jsr __ly2reg
- 02A7 18CE0399          ldy #L39
- 02AB BD0000            jsr __ly2reg2
- 02AE BD0000            jsr __ladd
- 02B1 18CE0007          ldy #_gPulseTarget
- 02B5 BD0000            jsr __lreg2y
- 02B8           ;         gFlipTarget = gPulseTarget + (OFF_TIME / 10);
- 02B8 18CE0007          ldy #_gPulseTarget
- 02BC BD0000            jsr __ly2reg
- 02BF 18CE0395          ldy #L40
- 02C3 BD0000            jsr __ly2reg2
- 02C6 BD0000            jsr __ladd
- 02C9 18CE000B          ldy #_gFlipTarget
- 02CD BD0000            jsr __lreg2y
- 02D0           ; 
- 02D0           ;         // flip h-bridge
- 02D0           ;         g_flipside ^= 1;
- 02D0 F60002            ldab _g_flipside
- 02D3 C801              eorb #1
- 02D5 F70002            stab _g_flipside
- 02D8           ; 
- 02D8           ;         switch (g_flipside)
- 02D8 F60002            ldab _g_flipside
- 02DB 4F                clra
- 02DC ED02              std 2,x
- 02DE 270A              beq L44
- 02E0 EC02              ldd 2,x
- 02E2 1A830001          cpd #1
- 02E6 270A              beq L45
- 02E8 2010              bra L41
- 02EA           X2:
- 02EA           ;         {
- 02EA           L44:
- 02EA           ;             case 0: sc_set_driver(1); break;
- 02EA CC0001            ldd #1
- 02ED BD0197            jsr _sc_set_driver
- 02F0 200E              bra L42
- 02F2           L45:
- 02F2           ;             case 1: sc_set_driver(2); break;
- 02F2 CC0002            ldd #2
- 02F5 BD0197            jsr _sc_set_driver
- 02F8 2006              bra L42
- 02FA           L41:
- 02FA           ;             default: sc_set_driver(0); break;
- 02FA CC0000            ldd #0
- 02FD BD0197            jsr _sc_set_driver
- 0300           L42:
- 0300           ;         }
- 0300           ; 
- 0300           ;         g_scycles++;        // increment cycle counter
- 0300 18CE0017          ldy #_g_scycles
- 0304 BD0000            jsr __ly2reg
- 0307 18CE039D          ldy #L36
- 030B BD0000            jsr __ly2reg2
- 030E BD0000            jsr __ladd
- 0311 18CE0017          ldy #_g_scycles
- 0315 BD0000            jsr __lreg2y
- 0318           ;     }
- 0318 2020              bra L38
- 031A           L37:
- 031A           ;     else                            // not time to flip yet
- 031A           ;     {
- 031A           ;         if (sc_get_driver())        // if pulse is still on...
- 031A BD01CB            jsr _sc_get_driver
- 031D C100              cmpb #0
- 031F 2719              beq L46
- 0321           ;         {
- 0321           ;             if (gTimerTicks > gPulseTarget) // pulse target reached?
- 0321 18CE0003          ldy #_gTimerTicks
- 0325 BD0000            jsr __ly2reg
- 0328 18CE0007          ldy #_gPulseTarget
- 032C BD0000            jsr __ly2reg2
- 032F BD0000            jsr __lcmp
- 0332 2F06              ble L48
- 0334           ;             {
- 0334           ;                 sc_set_driver(0);   // turn off pulse
- 0334 CC0000            ldd #0
- 0337 BD0197            jsr _sc_set_driver
- 033A           ;             }
- 033A           L48:
- 033A           ;         }
- 033A           L46:
- 033A           ;     }
- 033A           L38:
- 033A           ; }
- 033A           L27:
- 033A 8F                xgdx
- 033B C30006            addd #6
- 033E 8F                xgdx
- 033F 35                txs
- 0340 38                pulx
- 0341                   .dbline 0 ; func end
- 0341 3B                rti
- 0342           ;  lreg1 -> -4,x
- 0342           ;  lreg2 -> -8,x
- 0342           ;  IX -> 0,x
- 0342           ;         target -> +2,x
- 0342           ;           msec -> +10,x
- 0342           _TimerSleep::
- 0342 BD0000            jsr __enterb
- 0345 86                .byte 0x86
- 0346           ; 
- 0346           ; 
- 0346           ; void TimerSleep(long msec)
- 0346           ; {
- 0346           ;     long target;
- 0346           ; 
- 0346           ;     target = gTimerTicks + (msec / 10);
- 0346 EC00              ldd 0,x
- 0348 C3000A            addd #10
- 034B 188F              xgdy
- 034D BD0000            jsr __ly2reg
- 0350 18CE0399          ldy #L39
- 0354 BD0000            jsr __ly2reg2
- 0357 BD0000            jsr __ldiv
- 035A BD0000            jsr __lregmov
- 035D 18CE0003          ldy #_gTimerTicks
- 0361 BD0000            jsr __ly2reg
- 0364 BD0000            jsr __ladd
- 0367 EC00              ldd 0,x
- 0369 C30002            addd #2
- 036C 188F              xgdy
- 036E BD0000            jsr __lreg2y
- 0371           L51:
- 0371           L52:
- 0371           ; 
- 0371           ;     while(target > gTimerTicks);
- 0371 EC00              ldd 0,x
- 0373 C30002            addd #2
- 0376 188F              xgdy
- 0378 BD0000            jsr __ly2reg
- 037B 18CE0003          ldy #_gTimerTicks
- 037F BD0000            jsr __ly2reg2
- 0382 BD0000            jsr __lcmp
- 0385 2EEA              bgt L51
- 0387           ; }
- 0387           L50:
- 0387 8F                xgdx
- 0388 C30006            addd #6
- 038B 8F                xgdx
- 038C 35                txs
- 038D 38                pulx
- 038E                   .dbline 0 ; func end
- 038E 39                rts
- 038F           __HC11Setup::
- 038F           ; 
- 038F           ; 
- 038F           ; #define DUMMY_ENTRY	(void (*)())0xFFFF
- 038F           ; 
- 038F           ; void _HC11Setup(void)
- 038F           ; {
- 038F           ;     CONFIG = 0x05;
- 038F C605              ldab #5
- 0391 F7103F            stab 0x103f
- 0394           ; }
- 0394           L54:
- 0394                   .dbline 0 ; func end
- 0394 39                rts
+                ;              i -> +3,x
+ 0323           _TimerTOC2Isr::
+ 0323 BD0000            jsr __enterb
+ 0326 84                .byte 0x84
+ 0327           ; 
+ 0327           ; void TimerTOC2Isr( )
+ 0327           ; {
+ 0327           ;   static char gTimerTOC2 = 0;
+ 0327           ;   unsigned char i;
+ 0327           ; 
+ 0327           ;   TFLG1 = OC2F;                       // clear compare flag
+ 0327 C640              ldab #64
+ 0329 F71023            stab 0x1023
+ 032C           ;   TOC2 = TCNT + 20000;                // setup next interrupt 10 msec later
+ 032C                   ; vol
+ 032C FC100E            ldd 0x100e
+ 032F C34E20            addd #20000
+ 0332 FD1018            std 0x1018
+ 0335           ; 
+ 0335           ;   gTimerTicks++;
+ 0335 18CE000D          ldy #_gTimerTicks
+ 0339 BD0000            jsr __ly2reg
+ 033C 18CE0541          ldy #L46
+ 0340 BD0000            jsr __ly2reg2
+ 0343 BD0000            jsr __ladd
+ 0346 18CE000D          ldy #_gTimerTicks
+ 034A BD0000            jsr __lreg2y
+ 034D           ;   gTimerTOC2++;                       // advance 10 msec counter
+ 034D F60000            ldab L45
+ 0350 CB01              addb #1
+ 0352 F70000            stab L45
+ 0355           ; 
+ 0355           ;   if( gTimerTOC2 >= 100 )              // check for 100 & 10 msec
+ 0355 F60000            ldab L45
+ 0358 C164              cmpb #100
+ 035A 2548              blo L47
+ 035C           ;   {
+ 035C           ;     gTimerTOC2 = 0;
+ 035C 7F0000            clr L45
+ 035F           ; 
+ 035F           ;     g_etime_secs++;
+ 035F F60019            ldab _g_etime_secs
+ 0362 CB01              addb #1
+ 0364 F70019            stab _g_etime_secs
+ 0367           ; 
+ 0367           ;     if( g_etime_secs > 59 )
+ 0367 F60019            ldab _g_etime_secs
+ 036A C13B              cmpb #59
+ 036C 230B              bls L49
+ 036E           ;     {
+ 036E           ;       g_etime_secs = 0;
+ 036E 7F0019            clr _g_etime_secs
+ 0371           ;       g_etime_mins++;
+ 0371 F6001A            ldab _g_etime_mins
+ 0374 CB01              addb #1
+ 0376 F7001A            stab _g_etime_mins
+ 0379           ;     }
+ 0379           L49:
+ 0379           ; 
+ 0379           ;     if( g_etime_mins > 59 )
+ 0379 F6001A            ldab _g_etime_mins
+ 037C C13B              cmpb #59
+ 037E 230C              bls L51
+ 0380           ;     {
+ 0380           ;       g_etime_mins = 0;
+ 0380 7F001A            clr _g_etime_mins
+ 0383           ;       g_etime_hours++;
+ 0383 FC001B            ldd _g_etime_hours
+ 0386 C30001            addd #1
+ 0389 FD001B            std _g_etime_hours
+ 038C           ;     }
+ 038C           L51:
+ 038C           ; 
+ 038C           ;     gTimerSeconds++;                // advance seconds
+ 038C 18CE001D          ldy #_gTimerSeconds
+ 0390 BD0000            jsr __ly2reg
+ 0393 18CE053D          ldy #L53
+ 0397 BD0000            jsr __ly2reg2
+ 039A BD0000            jsr __ladd
+ 039D 18CE001D          ldy #_gTimerSeconds
+ 03A1 BD0000            jsr __lreg2y
+ 03A4           ;   }
+ 03A4           L47:
+ 03A4           ; 
+ 03A4           ;   //------------------------
+ 03A4           ;   // process solenoid stuff
+ 03A4           ;   //------------------------
+ 03A4           ; 
+ 03A4           ;   // If either one of the buttons has been pressed, the user is requesting an action.
+ 03A4           ; 	if( shutter_open || shutter_close )
+ 03A4 FC0006            ldd _shutter_open
+ 03A7 2608              bne L56
+ 03A9 FC0004            ldd _shutter_close
+ 03AC 2603              bne X4
+ 03AE 7E0445            jmp L54
+ 03B1           X4:
+ 03B1           L56:
+ 03B1           ; 	{
+ 03B1           ;     // Set up the delay timers.
+ 03B1           ; 	  gPulseTarget = gTimerTicks + ( ON_TIME / 10 );
+ 03B1 18CE000D          ldy #_gTimerTicks
+ 03B5 BD0000            jsr __ly2reg
+ 03B8 18CE0539          ldy #L57
+ 03BC BD0000            jsr __ly2reg2
+ 03BF BD0000            jsr __ladd
+ 03C2 18CE0011          ldy #_gPulseTarget
+ 03C6 BD0000            jsr __lreg2y
+ 03C9           ;               gFlipTarget = gPulseTarget + ( OFF_TIME / 10 );
+ 03C9 18CE0011          ldy #_gPulseTarget
+ 03CD BD0000            jsr __ly2reg
+ 03D0 18CE0535          ldy #L58
+ 03D4 BD0000            jsr __ly2reg2
+ 03D7 BD0000            jsr __ladd
+ 03DA 18CE0015          ldy #_gFlipTarget
+ 03DE BD0000            jsr __lreg2y
+ 03E1           ;               
+ 03E1           ;               // If the desired action is shutter open, signal to open the shutter ...
+ 03E1           ;               if( shutter_open )
+ 03E1 FC0006            ldd _shutter_open
+ 03E4 2721              beq L59
+ 03E6           ;               {
+ 03E6           ;       // ... but only if the shutter is not already opened.
+ 03E6           ;                 if( !shutter_opened )
+ 03E6 FC000A            ldd _shutter_opened
+ 03E9 260E              bne L61
+ 03EB           ;       {
+ 03EB           ;                         open_shutter = 1;
+ 03EB CC0001            ldd #1
+ 03EE FD0002            std _open_shutter
+ 03F1           ;                         close_shutter = 0;
+ 03F1 CC0000            ldd #0
+ 03F4 FD0000            std _close_shutter
+ 03F7           ;                       }
+ 03F7 2040              bra L60
+ 03F9           L61:
+ 03F9           ; 
+ 03F9           ; 			// If the shutter is already opened, set the request back to zero.
+ 03F9           ; 			else
+ 03F9           ; 			{
+ 03F9           ; 			  open_shutter = close_shutter = 0;
+ 03F9 CC0000            ldd #0
+ 03FC FD0000            std _close_shutter
+ 03FF CC0000            ldd #0
+ 0402 FD0002            std _open_shutter
+ 0405           ;                       }
+ 0405           ;               }
+ 0405 2032              bra L60
+ 0407           L59:
+ 0407           ; 
+ 0407           ; 		// If the desired action is shutter close, signal to close the shutter ...
+ 0407           ; 		else if( shutter_close )
+ 0407 FC0004            ldd _shutter_close
+ 040A 2721              beq L63
+ 040C           ;               {
+ 040C           ;       // ... but only if the shutter is not already closed.
+ 040C           ;       if( !shutter_closed )
+ 040C FC0008            ldd _shutter_closed
+ 040F 260E              bne L65
+ 0411           ;                       {
+ 0411           ;         open_shutter = 0;
+ 0411 CC0000            ldd #0
+ 0414 FD0002            std _open_shutter
+ 0417           ;                   close_shutter = 1;
+ 0417 CC0001            ldd #1
+ 041A FD0000            std _close_shutter
+ 041D           ;                       }
+ 041D 201A              bra L64
+ 041F           L65:
+ 041F           ; 
+ 041F           ;       // If the shutter is already closed, set the request back to zero.
+ 041F           ; 			else
+ 041F           ; 			{
+ 041F           ; 			  open_shutter = close_shutter = 0;
+ 041F CC0000            ldd #0
+ 0422 FD0000            std _close_shutter
+ 0425 CC0000            ldd #0
+ 0428 FD0002            std _open_shutter
+ 042B           ;                       }
+ 042B           ;               }
+ 042B 200C              bra L64
+ 042D           L63:
+ 042D           ; 
+ 042D           ; 		// If no requests have been made, turn both signals off.
+ 042D           ; 		else
+ 042D           ; 		{
+ 042D           ; 		  open_shutter = close_shutter = 0;
+ 042D CC0000            ldd #0
+ 0430 FD0000            std _close_shutter
+ 0433 CC0000            ldd #0
+ 0436 FD0002            std _open_shutter
+ 0439           ;               }
+ 0439           L64:
+ 0439           L60:
+ 0439           ; 
+ 0439           ; 		// After the appropriate flag has been set, set the "request" back to zero.
+ 0439           ; 		shutter_open = shutter_close = 0;
+ 0439 CC0000            ldd #0
+ 043C FD0004            std _shutter_close
+ 043F CC0000            ldd #0
+ 0442 FD0006            std _shutter_open
+ 0445           ;       }
+ 0445           L54:
+ 0445           ; 
+ 0445           ; 	// If the pulse has been on for the desired number of milliseconds ...
+ 0445           ;   if( gTimerTicks < gPulseTarget )
+ 0445 18CE000D          ldy #_gTimerTicks
+ 0449 BD0000            jsr __ly2reg
+ 044C 18CE0011          ldy #_gPulseTarget
+ 0450 BD0000            jsr __ly2reg2
+ 0453 BD0000            jsr __lcmp
+ 0456 2C6A              bge L67
+ 0458           ;   {
+ 0458           ; 
+ 0458           ;     // ... open the shutter, if that is the desired action.
+ 0458           ;         if( open_shutter )
+ 0458 FC0002            ldd _open_shutter
+ 045B 272C              beq L69
+ 045D           ;               {
+ 045D           ;       sc_set_driver( 2 );
+ 045D CC0002            ldd #2
+ 0460 BD02B3            jsr _sc_set_driver
+ 0463           ;                       shutter_opened = 1;
+ 0463 CC0001            ldd #1
+ 0466 FD000A            std _shutter_opened
+ 0469           ;                       shutter_closed = 0;
+ 0469 CC0000            ldd #0
+ 046C FD0008            std _shutter_closed
+ 046F           ;       g_scycles++;        // increment cycle counter
+ 046F 18CE0021          ldy #_g_scycles
+ 0473 BD0000            jsr __ly2reg
+ 0476 18CE053D          ldy #L53
+ 047A BD0000            jsr __ly2reg2
+ 047D BD0000            jsr __ladd
+ 0480 18CE0021          ldy #_g_scycles
+ 0484 BD0000            jsr __lreg2y
+ 0487           ;               }
+ 0487 2052              bra L68
+ 0489           L69:
+ 0489           ; 
+ 0489           ; 		// .. or close the shutter, if that is the desired action.
+ 0489           ; 		else if( close_shutter )
+ 0489 FC0000            ldd _close_shutter
+ 048C 272C              beq L71
+ 048E           ;               {
+ 048E           ;       sc_set_driver( 1 );
+ 048E CC0001            ldd #1
+ 0491 BD02B3            jsr _sc_set_driver
+ 0494           ;                       shutter_opened = 0;
+ 0494 CC0000            ldd #0
+ 0497 FD000A            std _shutter_opened
+ 049A           ;                       shutter_closed = 1;
+ 049A CC0001            ldd #1
+ 049D FD0008            std _shutter_closed
+ 04A0           ;       g_scycles++;        // increment cycle counter
+ 04A0 18CE0021          ldy #_g_scycles
+ 04A4 BD0000            jsr __ly2reg
+ 04A7 18CE053D          ldy #L53
+ 04AB BD0000            jsr __ly2reg2
+ 04AE BD0000            jsr __ladd
+ 04B1 18CE0021          ldy #_g_scycles
+ 04B5 BD0000            jsr __lreg2y
+ 04B8           ;               }
+ 04B8 2021              bra L68
+ 04BA           L71:
+ 04BA           ; 
+ 04BA           ; 		// ... the default is to set the driver back to the idle state.
+ 04BA           ; 		else
+ 04BA           ; 		{
+ 04BA           ;       sc_set_driver( 0 );
+ 04BA CC0000            ldd #0
+ 04BD BD02B3            jsr _sc_set_driver
+ 04C0           ;               }
+ 04C0           ;   }
+ 04C0 2019              bra L68
+ 04C2           L67:
+ 04C2           ; 
+ 04C2           ;   // If the desired number of milliseconds has passed, set the driver back to the idle state.
+ 04C2           ;   else
+ 04C2           ;   {
+ 04C2           ;     // If the pulse is still on ...
+ 04C2           ;     if( sc_get_driver( ) )
+ 04C2 BD02E7            jsr _sc_get_driver
+ 04C5 C100              cmpb #0
+ 04C7 2706              beq L73
+ 04C9           ;     {
+ 04C9           ;       // ... turn off the pulse.
+ 04C9           ;       sc_set_driver( 0 );
+ 04C9 CC0000            ldd #0
+ 04CC BD02B3            jsr _sc_set_driver
+ 04CF           ;     }
+ 04CF           L73:
+ 04CF           ; 
+ 04CF           ;     // Set the requests back to zero.
+ 04CF           ; 		open_shutter = close_shutter = 0;
+ 04CF CC0000            ldd #0
+ 04D2 FD0000            std _close_shutter
+ 04D5 CC0000            ldd #0
+ 04D8 FD0002            std _open_shutter
+ 04DB           ;   }
+ 04DB           L68:
+ 04DB           ; }
+ 04DB           L44:
+ 04DB 08                inx
+ 04DC 08                inx
+ 04DD 08                inx
+ 04DE 08                inx
+ 04DF 35                txs
+ 04E0 38                pulx
+ 04E1                   .dbline 0 ; func end
+ 04E1 3B                rti
+ 04E2           ;  lreg1 -> -4,x
+ 04E2           ;  lreg2 -> -8,x
+ 04E2           ;  IX -> 0,x
+ 04E2           ;         target -> +2,x
+ 04E2           ;           msec -> +10,x
+ 04E2           _TimerSleep::
+ 04E2 BD0000            jsr __enterb
+ 04E5 86                .byte 0x86
+ 04E6           ; 
+ 04E6           ; void TimerSleep( long msec )
+ 04E6           ; {
+ 04E6           ;   long target;
+ 04E6           ; 
+ 04E6           ;   target = gTimerTicks + ( msec / 10 );
+ 04E6 EC00              ldd 0,x
+ 04E8 C3000A            addd #10
+ 04EB 188F              xgdy
+ 04ED BD0000            jsr __ly2reg
+ 04F0 18CE0539          ldy #L57
+ 04F4 BD0000            jsr __ly2reg2
+ 04F7 BD0000            jsr __ldiv
+ 04FA BD0000            jsr __lregmov
+ 04FD 18CE000D          ldy #_gTimerTicks
+ 0501 BD0000            jsr __ly2reg
+ 0504 BD0000            jsr __ladd
+ 0507 EC00              ldd 0,x
+ 0509 C30002            addd #2
+ 050C 188F              xgdy
+ 050E BD0000            jsr __lreg2y
+ 0511           L76:
+ 0511           L77:
+ 0511           ; 
+ 0511           ;   while( target > gTimerTicks );
+ 0511 EC00              ldd 0,x
+ 0513 C30002            addd #2
+ 0516 188F              xgdy
+ 0518 BD0000            jsr __ly2reg
+ 051B 18CE000D          ldy #_gTimerTicks
+ 051F BD0000            jsr __ly2reg2
+ 0522 BD0000            jsr __lcmp
+ 0525 2EEA              bgt L76
+ 0527           ; }
+ 0527           L75:
+ 0527 8F                xgdx
+ 0528 C30006            addd #6
+ 052B 8F                xgdx
+ 052C 35                txs
+ 052D 38                pulx
+ 052E                   .dbline 0 ; func end
+ 052E 39                rts
+ 052F           __HC11Setup::
+ 052F           ; 
+ 052F           ; #define DUMMY_ENTRY	(void (*)())0xFFFF
+ 052F           ; 
+ 052F           ; void _HC11Setup( void )
+ 052F           ; {
+ 052F           ;   CONFIG = 0x05;
+ 052F C605              ldab #5
+ 0531 F7103F            stab 0x103f
+ 0534           ; }
+ 0534           L79:
+ 0534                   .dbline 0 ; func end
+ 0534 39                rts
                         .area memory(abs)
                         .org 0xffd6
  FFD6           _interrupt_vectors::
@@ -745,7 +1026,7 @@
  FFE0 FFFF              .word 65535
  FFE2 FFFF              .word 65535
  FFE4 FFFF              .word 65535
- FFE6 0207              .word _TimerTOC2Isr
+ FFE6 0323              .word _TimerTOC2Isr
  FFE8 FFFF              .word 65535
  FFEA FFFF              .word 65535
  FFEC FFFF              .word 65535
@@ -760,57 +1041,76 @@
  FFFE 0000              .word __start
                         .area data
                         .area bss
- 0000           _old_buttons::
- 0000                   .blkb 1
- 0001           _new_buttons::
- 0001                   .blkb 1
- 0002           _g_flipside::
- 0002                   .blkb 1
- 0003           _gTimerTicks::
- 0003                   .blkb 4
- 0007           _gPulseTarget::
- 0007                   .blkb 4
- 000B           _gFlipTarget::
- 000B                   .blkb 4
- 000F           _g_etime_secs::
- 000F                   .blkb 1
- 0010           _g_etime_mins::
- 0010                   .blkb 1
- 0011           _g_etime_hours::
- 0011                   .blkb 2
- 0013           _gTimerSeconds::
- 0013                   .blkb 4
- 0017           _g_scycles::
- 0017                   .blkb 4
+ 0000           _close_shutter::
+ 0000                   .blkb 2
+ 0002           _open_shutter::
+ 0002                   .blkb 2
+ 0004           _shutter_close::
+ 0004                   .blkb 2
+ 0006           _shutter_open::
+ 0006                   .blkb 2
+ 0008           _shutter_closed::
+ 0008                   .blkb 2
+ 000A           _shutter_opened::
+ 000A                   .blkb 2
+ 000C           _g_flipside::
+ 000C                   .blkb 1
+ 000D           _gTimerTicks::
+ 000D                   .blkb 4
+ 0011           _gPulseTarget::
+ 0011                   .blkb 4
+ 0015           _gFlipTarget::
+ 0015                   .blkb 4
+ 0019           _g_etime_secs::
+ 0019                   .blkb 1
+ 001A           _g_etime_mins::
+ 001A                   .blkb 1
+ 001B           _g_etime_hours::
+ 001B                   .blkb 2
+ 001D           _gTimerSeconds::
+ 001D                   .blkb 4
+ 0021           _g_scycles::
+ 0021                   .blkb 4
                         .area text
- 0395           L40:
- 0395 0000005A          .word 0,90
- 0399           L39:
- 0399 0000000A          .word 0,10
- 039D           L36:
- 039D 00000001          .word 0,1
- 03A1           L29:
- 03A1 00000001          .word 0,1
- 03A5           L18:
- 03A5 6F646F6D657465723D2530376C6400    .byte 'o,'d,'o,'m,'e,'t,'e,'r,61,37,48,55,'l,'d,0
- 03B4           L17:
- 03B4 65743D253032643A253032643A253032  .byte 'e,'t,61,37,48,50,'d,58,37,48,50,'d,58,37,48,50
- 03C4 6400              .byte 'd,0
- 03C6           L16:
- 03C6 6F6E3D2564206D73206F66663D256420  .byte 'o,'n,61,37,'d,32,'m,'s,32,'o,'f,'f,61,37,'d,32
- 03D6 6D7300            .byte 'm,'s,0
- 03D9           L15:
- 03D9 2D2D2D2D2D204379636C696E67202D2D  .byte 45,45,45,45,45,32,'C,'y,'c,'l,'i,'n,'g,32,45,45
- 03E9 2D2D2D2D00        .byte 45,45,45,45,0
- 03EE           L14:
- 03EE 00000032          .word 0,50
- 03F2           L8:
- 03F2 00000BB8          .word 0,3000
- 03F6           L7:
- 03F6 56657273696F6E20312E303000        .byte 'V,'e,'r,'s,'i,'o,'n,32,49,46,48,48,0
- 0403           L6:
- 0403 5448322053687574746572204A696700  .byte 'T,'H,50,32,'S,'h,'u,'t,'t,'e,'r,32,'J,'i,'g,0
- 0413           L5:
- 0413 00000000          .word 0,0
- 0417           L4:
- 0417 00000000          .word 0,0
+ 0535           L58:
+ 0535 0000005A          .word 0,90
+ 0539           L57:
+ 0539 0000000A          .word 0,10
+ 053D           L53:
+ 053D 00000001          .word 0,1
+ 0541           L46:
+ 0541 00000001          .word 0,1
+ 0545           L36:
+ 0545 416C726561647920636C6F7365642100  .byte 'A,'l,'r,'e,'a,'d,'y,32,'c,'l,'o,'s,'e,'d,33,0
+ 0555           L31:
+ 0555 000000C8          .word 0,200
+ 0559           L30:
+ 0559 416C7265616479206F70656E65642100  .byte 'A,'l,'r,'e,'a,'d,'y,32,'o,'p,'e,'n,'e,'d,33,0
+ 0569           L25:
+ 0569 6F646F6D657465723D2530376C6400    .byte 'o,'d,'o,'m,'e,'t,'e,'r,61,37,48,55,'l,'d,0
+ 0578           L24:
+ 0578 74696D653D253032643A253032643A25  .byte 't,'i,'m,'e,61,37,48,50,'d,58,37,48,50,'d,58,37
+ 0588 30326400          .byte 48,50,'d,0
+ 058C           L23:
+ 058C 6F6E3D2564206D73206F66663D256420  .byte 'o,'n,61,37,'d,32,'m,'s,32,'o,'f,'f,61,37,'d,32
+ 059C 6D7300            .byte 'm,'s,0
+ 059F           L22:
+ 059F 736875747465723D257300    .byte 's,'h,'u,'t,'t,'e,'r,61,37,'s,0
+ 05AA           L21:
+ 05AA 00000032          .word 0,50
+ 05AE           L18:
+ 05AE 69646C6500        .byte 'i,'d,'l,'e,0
+ 05B3           L17:
+ 05B3 636C6F73656400    .byte 'c,'l,'o,'s,'e,'d,0
+ 05BA           L14:
+ 05BA 6F70656E656400    .byte 'o,'p,'e,'n,'e,'d,0
+ 05C1           L8:
+ 05C1 00000BB8          .word 0,3000
+ 05C5           L7:
+ 05C5 56657273696F6E20312E303000        .byte 'V,'e,'r,'s,'i,'o,'n,32,49,46,48,48,0
+ 05D2           L6:
+ 05D2 5448322053687574746572204A696700  .byte 'T,'H,50,32,'S,'h,'u,'t,'t,'e,'r,32,'J,'i,'g,0
+ 05E2           L5:
+ 05E2 00000000          .word 0,0
+ 05E6           L4:
+ 05E6 00000000          .word 0,0
